@@ -72,13 +72,15 @@
       <pre class="code-preview-box"><code>{{ store.markdown }}</code></pre>
     </div>
 
-    <!-- Muya WYSIWYG Editorial Paper + Right Margin Comment Indicators -->
+    <!-- Muya WYSIWYG Editorial Paper + Right Margin Comment Cards -->
     <div
       v-show="store.activeDocRelPath && isMarkdownFile"
       ref="scrollEl"
       class="muya-scroll"
+      :class="{ 'with-comment-rail': showCommentRail }"
       @mouseup="handleSelectionMouseUp"
       @mousedown="handleEditorMouseDown"
+      @click="activeMarginThreadId = null"
       @wheel.passive="onUserScroll"
       @touchstart.passive="onUserScroll"
     >
@@ -159,18 +161,81 @@
           </div>
         </div>
 
-        <!-- Subtle Margin Comment Pills (Claude Docs style, no permanent 4th column!) -->
-        <div class="margin-gutter">
-          <button
-            v-for="group in marginThreadGroups"
-            :key="group.thread.id"
-            class="margin-pill"
-            :style="{ top: group.top + 'px' }"
-            @click.stop="openThreadPopover(group.thread, $event)"
-          >
-            <MessageSquare :size="13" :stroke-width="1.75" />
-            <span>{{ group.thread.messages.length }}</span>
-          </button>
+        <!-- Right-Margin Comment Rail (Claude Docs / Google Docs inline dialog cards when wide, compact pills when narrow) -->
+        <div class="margin-gutter" :class="{ 'rail-mode': showCommentRail }">
+          <template v-if="showCommentRail">
+            <div
+              v-for="group in marginThreadGroups"
+              :key="group.thread.id"
+              class="margin-thread-card"
+              :class="{ active: activeMarginThreadId === group.thread.id }"
+              :style="{ top: group.top + 'px' }"
+              @click.stop="selectMarginThread(group.thread)"
+              @mouseenter="previewCommentAnchor(group.thread.blockIndex)"
+              @mouseleave="clearCommentAnchorPreview"
+            >
+              <div class="mtc-messages">
+                <div
+                  v-for="m in group.thread.messages"
+                  :key="m.id"
+                  class="mtc-msg"
+                >
+                  <div class="mtc-msg-head">
+                    <span class="mtc-avatar" :class="m.who">
+                      {{ m.who === 'user' ? 'U' : 'AI' }}
+                    </span>
+                    <span class="mtc-author">{{ m.who === 'user' ? '你' : activeEngineDisplayName }}</span>
+                    <span class="mtc-time">{{ formatCommentTime(m.timestamp) }}</span>
+                  </div>
+                  <div class="mtc-msg-body">
+                    <template v-for="(seg, si) in splitMentionSegments(m.text)" :key="si">
+                      <span v-if="seg.isMention" class="mtc-mention">{{ seg.text }}</span>
+                      <span v-else>{{ seg.text }}</span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="activeMarginThreadId === group.thread.id" class="mtc-reply-box" @click.stop>
+                <input
+                  v-model="marginReplyDraft"
+                  class="mtc-reply-input"
+                  placeholder="回复或 @AI 继续修改…"
+                  @keydown.enter.prevent="submitMarginReply(group.thread.id)"
+                  @keydown.escape.prevent="activeMarginThreadId = null"
+                />
+                <div class="mtc-reply-actions">
+                  <button
+                    class="mtc-resolve-btn"
+                    title="标记该批注已解决"
+                    @click.stop="resolveMarginThread(group.thread.id)"
+                  >
+                    <Check :size="12" :stroke-width="2.1" />
+                    <span>解决</span>
+                  </button>
+                  <button
+                    class="mtc-send-btn"
+                    :disabled="!marginReplyDraft.trim()"
+                    @click.stop="submitMarginReply(group.thread.id)"
+                  >
+                    发送
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <button
+              v-for="group in marginThreadGroups"
+              :key="group.thread.id"
+              class="margin-pill"
+              :style="{ top: group.top + 'px' }"
+              @click.stop="openThreadPopover(group.thread, $event)"
+            >
+              <MessageSquare :size="13" :stroke-width="1.75" />
+              <span>{{ group.thread.messages.length }}</span>
+            </button>
+          </template>
         </div>
 
         <!-- Real @muyajs/core Mount Point -->
@@ -482,6 +547,22 @@ const activeThread = computed(
 )
 
 const marginTick = ref(0)
+const scrollPaneWidth = ref(1000)
+const activeMarginThreadId = ref<string | null>(null)
+const marginReplyDraft = ref('')
+
+const activeEngineDisplayName = computed(() => {
+  const eng = store.activeSession?.engine || store.preferredEngine || 'agy'
+  if (eng === 'claude') return 'Claude'
+  if (eng === 'codex') return 'Codex'
+  return 'AGY'
+})
+
+const openThreadsCount = computed(() => store.threads.filter((t) => !t.resolved).length)
+const showCommentRail = computed(
+  () => openThreadsCount.value > 0 && scrollPaneWidth.value >= 820
+)
+
 const marginThreadGroups = computed(() => {
   void marginTick.value
   const wrap = hostWrapEl.value
@@ -491,20 +572,96 @@ const marginThreadGroups = computed(() => {
     const el = els[Math.min(Math.max(0, thread.blockIndex), Math.max(0, els.length - 1))]
     let top = 24 + idx * 44
     if (wrap && el) {
-      top = Math.max(12, el.getBoundingClientRect().top - wrap.getBoundingClientRect().top + 4)
+      top = Math.max(12, el.getBoundingClientRect().top - wrap.getBoundingClientRect().top + 2)
     }
-    return { thread, top }
+    const estHeight = showCommentRail.value
+      ? Math.max(
+          92,
+          28 +
+            thread.messages.reduce(
+              (acc, m) => acc + 30 + Math.ceil(m.text.length / 18) * 19,
+              0
+            ) +
+            (activeMarginThreadId.value === thread.id ? 78 : 0)
+        )
+      : 32
+    return { thread, top, estHeight }
   })
-  // Prevent vertical overlap when multiple comments anchor on the same paragraph
+  // Prevent vertical overlap when multiple comments anchor near each other
   raw.sort((a, b) => a.top - b.top)
-  let lastTop = -Infinity
-  const minGap = 32
+  let nextMinTop = 0
   return raw.map((item) => {
-    const adjusted = item.top < lastTop + minGap ? lastTop + minGap : item.top
-    lastTop = adjusted
+    const adjusted = item.top < nextMinTop ? nextMinTop : item.top
+    nextMinTop = adjusted + item.estHeight + 14
     return { thread: item.thread, top: adjusted }
   })
 })
+
+function formatCommentTime(ts: number): string {
+  const d = new Date(ts)
+  const mon = d.getMonth() + 1
+  const day = d.getDate()
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${mon}月${day}日 ${hh}:${mm}`
+}
+
+function splitMentionSegments(text: string): Array<{ text: string; isMention: boolean }> {
+  const parts = text.split(/(@(?:Claude|AGY|Codex|AI)\b)/gi)
+  return parts
+    .filter((p) => p.length > 0)
+    .map((p) => ({
+      text: p,
+      isMention: /^@(?:Claude|AGY|Codex|AI)$/i.test(p)
+    }))
+}
+
+function selectMarginThread(thread: CommentThread) {
+  if (activeMarginThreadId.value !== thread.id) {
+    activeMarginThreadId.value = thread.id
+    marginReplyDraft.value = ''
+  }
+  previewCommentAnchor(thread.blockIndex)
+}
+
+function previewCommentAnchor(blockIndex: number) {
+  const wrap = hostWrapEl.value
+  const els = getTopBlockElements()
+  const target = els[blockIndex]
+  if (!wrap || !target) return
+  const wRect = wrap.getBoundingClientRect()
+  const tRect = target.getBoundingClientRect()
+  reviewFocusBox.top = Math.max(0, tRect.top - wRect.top - 4)
+  reviewFocusBox.left = Math.max(0, tRect.left - wRect.left - 8)
+  reviewFocusBox.width = tRect.width + 16
+  reviewFocusBox.height = Math.max(28, tRect.height + 8)
+  reviewFocusBox.visible = true
+}
+
+function clearCommentAnchorPreview() {
+  if (reviewFocusIndex.value < 0) {
+    reviewFocusBox.visible = false
+  }
+}
+
+async function submitMarginReply(threadId: string) {
+  const text = marginReplyDraft.value.trim()
+  if (!text) return
+  marginReplyDraft.value = ''
+  await store.replyInThread(threadId, text)
+  nextTick(() => {
+    marginTick.value += 1
+  })
+}
+
+async function resolveMarginThread(threadId: string) {
+  activeMarginThreadId.value = null
+  reviewFocusBox.visible = false
+  await store.resolveThread(threadId)
+  nextTick(() => {
+    marginTick.value += 1
+  })
+}
 
 const animState = reactive({
   runId: 0,
@@ -1372,9 +1529,21 @@ const onDocClick = (e: MouseEvent) => {
   }
 }
 
+let scrollResizeObs: ResizeObserver | null = null
+
 onMounted(() => {
   document.addEventListener('click', onDocClick)
   window.addEventListener('keydown', onGlobalKeydown)
+  if (scrollEl.value) {
+    scrollPaneWidth.value = scrollEl.value.clientWidth || 1000
+    scrollResizeObs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        scrollPaneWidth.value = entry.contentRect.width
+        marginTick.value += 1
+      }
+    })
+    scrollResizeObs.observe(scrollEl.value)
+  }
   if (store.activeDocRelPath) {
     mountMuya(store.markdown)
   }
@@ -1383,6 +1552,10 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
   window.removeEventListener('keydown', onGlobalKeydown)
+  if (scrollResizeObs) {
+    scrollResizeObs.disconnect()
+    scrollResizeObs = null
+  }
   if (saveDebounceTimer) clearTimeout(saveDebounceTimer)
   if (saveHintTimer) clearTimeout(saveHintTimer)
   if (muyaInstance) {
@@ -1542,6 +1715,10 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: 36px 76px 100px 48px;
   position: relative;
+  transition: padding-right 0.2s ease;
+}
+.muya-scroll.with-comment-rail {
+  padding: 36px 316px 120px 44px;
 }
 .margin-gutter {
   position: absolute;
@@ -1549,6 +1726,146 @@ onUnmounted(() => {
   right: -56px;
   width: 44px;
   pointer-events: none;
+}
+.margin-gutter.rail-mode {
+  right: -292px;
+  width: 264px;
+}
+.margin-thread-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: auto;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-hairline);
+  border-radius: 13px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition:
+    top 0.22s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+.margin-thread-card:hover {
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-pop);
+}
+.margin-thread-card.active {
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-pop);
+  transform: translateX(-4px);
+  z-index: 25;
+}
+.mtc-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.mtc-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mtc-msg-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.mtc-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #ffffff;
+  flex-shrink: 0;
+}
+.mtc-avatar.user {
+  background: #d14d41;
+}
+.mtc-avatar.agent {
+  background: var(--accent);
+}
+.mtc-author {
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+.mtc-time {
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.mtc-msg-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-body);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.mtc-mention {
+  color: #2563eb;
+  font-weight: 500;
+}
+[data-theme='dark'] .mtc-mention {
+  color: #60a5fa;
+}
+.mtc-reply-box {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.mtc-reply-input {
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sidebar);
+  color: var(--ink-primary);
+  font-size: 12px;
+  outline: none;
+}
+.mtc-reply-input:focus {
+  border-color: var(--accent);
+}
+.mtc-reply-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.mtc-resolve-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  background: var(--bg-subtle);
+}
+.mtc-resolve-btn:hover {
+  background: var(--bg-hover);
+  color: var(--ink-primary);
+}
+.mtc-send-btn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--ink-primary);
+  color: var(--bg-canvas);
+}
+.mtc-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .margin-pill {
   position: absolute;
