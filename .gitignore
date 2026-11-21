@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+target/
+packages/muya/lib/
+packages/desktop/src-tauri/gen/
+.mark5/
+*.log
+.DS_Store
