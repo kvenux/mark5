@@ -97,11 +97,9 @@
             >
               <div class="item-main">
                 <div class="item-top-row">
-                  <Loader2
+                  <span
                     v-if="store.sessionBusyMap[s.id]"
-                    :size="13"
-                    :stroke-width="2.1"
-                    class="state-spinner"
+                    class="state-dot running"
                     :title="store.sessionLiveStatusMap[s.id] || '思考中...'"
                   />
                   <span v-else-if="s.unread" class="state-dot unread" title="已完成（未读）" />
@@ -151,11 +149,9 @@
           >
             <div class="item-main">
               <div class="item-top-row">
-                <Loader2
+                <span
                   v-if="store.sessionBusyMap[s.id]"
-                  :size="13"
-                  :stroke-width="2.1"
-                  class="state-spinner"
+                  class="state-dot running"
                   :title="store.sessionLiveStatusMap[s.id] || '思考中...'"
                 />
                 <span v-else-if="s.unread" class="state-dot unread" title="已完成（未读）" />
@@ -393,7 +389,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { FileText, FolderPlus, Loader2, PanelLeftClose, Plus, Search, Settings, SquarePlus } from 'lucide-vue-next'
+import { FileText, FolderPlus, PanelLeftClose, Plus, Search, Settings, SquarePlus } from 'lucide-vue-next'
 import type { FileEntry } from '@shared/types'
 import { useAppStore } from '@/stores/appStore'
 import FileTreeNode from './FileTreeNode.vue'
@@ -922,18 +918,12 @@ onUnmounted(() => {
   border-radius: 50%;
   flex-shrink: 0;
 }
+.state-dot.running {
+  background: var(--accent);
+  animation: mcPulse 1s infinite;
+}
 .state-dot.unread {
   background: #2563eb;
-}
-.state-spinner {
-  color: #3b82f6;
-  flex-shrink: 0;
-  animation: sbSpin 0.85s linear infinite;
-}
-@keyframes sbSpin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 .item-title {
   overflow: hidden;
