@@ -214,6 +214,7 @@ impl AgyAdapter {
             "init" => {
                 let cid = parsed
                     .get("conversation_id")
+                    .or_else(|| parsed.pointer("/init/conversation_id"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 if let Some(ref c) = cid {
@@ -223,6 +224,78 @@ impl AgyAdapter {
                         .await;
                 }
                 on_event(make_init_event(&req.session_id, cid));
+            }
+            "step_update" => {
+                let Some(su) = parsed.get("step_update") else {
+                    return;
+                };
+                let step_type = su.get("step_type").and_then(|v| v.as_str()).unwrap_or("");
+                let su_state = su.get("state").and_then(|v| v.as_str()).unwrap_or("");
+                let su_cid = su
+                    .get("conversation_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                if step_type == "tool" {
+                    let raw_name = su
+                        .get("tool_name")
+                        .or_else(|| su.pointer("/tool_info/name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("tool");
+                    let params = su.pointer("/tool_info/parameters");
+                    let mcp_tool = if raw_name == "call_mcp_tool" {
+                        params
+                            .and_then(|p| p.get("ToolName"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(raw_name)
+                    } else {
+                        raw_name
+                    };
+                    let mcp_args = if raw_name == "call_mcp_tool" {
+                        params.and_then(|p| p.get("Arguments")).or(params)
+                    } else {
+                        params
+                    };
+                    let path_arg = mcp_args
+                        .and_then(|a| {
+                            a.get("Path")
+                                .or_else(|| a.get("AbsolutePath"))
+                                .or_else(|| a.get("file_path"))
+                                .or_else(|| a.get("CommandLine"))
+                        })
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    if is_internal_mcp_schema_read(mcp_tool, path_arg) {
+                        return;
+                    }
+
+                    let state = match su_state {
+                        "DONE" | "COMPLETED" | "done" => "done",
+                        "ERROR" | "FAILED" | "error" => "error",
+                        _ => "running",
+                    };
+                    let readable = format_readable_tool(mcp_tool, path_arg);
+                    on_event(AgentStreamEvent {
+                        session_id: req.session_id.clone(),
+                        kind: "tool".to_string(),
+                        conversation_id: su_cid,
+                        step_index: su.get("step_index").and_then(|v| v.as_i64()),
+                        tool_name: Some(mcp_tool.to_string()),
+                        tool_state: Some(state.to_string()),
+                        tool_detail: Some(readable),
+                        duration_sec: su.get("duration_seconds").and_then(|v| v.as_f64()),
+                        text: None,
+                        error: None,
+                    });
+                } else if let Some(delta) = su.get("text_delta").and_then(|v| v.as_str()) {
+                    if !delta.is_empty() {
+                        accumulated.push_str(delta);
+                        on_event(make_delta_event(&req.session_id, delta));
+                    }
+                } else if step_type == "agent_response" && su_state == "ACTIVE" {
+                    on_event(make_status_event(&req.session_id, "正在思考与组织内容..."));
+                }
             }
             "tool" => {
                 let raw_name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
@@ -261,12 +334,56 @@ impl AgyAdapter {
             }
             "result" => {
                 *saw_result = true;
-                let final_text = parsed
-                    .get("result")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(accumulated.as_str())
-                    .to_string();
-                on_event(make_done_event(&req.session_id, final_text));
+                if let Some(res_obj) = parsed.get("result").and_then(|v| v.as_object()) {
+                    let cid = res_obj
+                        .get("conversation_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    if let Some(ref c) = cid {
+                        let _ = self
+                            .workspace
+                            .update_session_conversation_id(&req.root_path, &req.session_id, c)
+                            .await;
+                    }
+                    let status = res_obj.get("status").and_then(|v| v.as_str()).unwrap_or("SUCCESS");
+                    if status != "SUCCESS" {
+                        let err_msg = res_obj
+                            .get("error")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("AGY 返回状态：{status}"));
+                        on_event(make_error_event(&req.session_id, err_msg));
+                        return;
+                    }
+                    let resp = res_obj
+                        .get("response")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let final_text = if !accumulated.trim().is_empty() {
+                        accumulated.trim().to_string()
+                    } else {
+                        resp.trim().to_string()
+                    };
+                    on_event(AgentStreamEvent {
+                        session_id: req.session_id.clone(),
+                        kind: "done".to_string(),
+                        conversation_id: cid,
+                        step_index: None,
+                        tool_name: None,
+                        tool_state: None,
+                        tool_detail: None,
+                        duration_sec: res_obj.get("duration_seconds").and_then(|v| v.as_f64()),
+                        text: Some(final_text),
+                        error: None,
+                    });
+                } else {
+                    let final_text = parsed
+                        .get("result")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| accumulated.trim().to_string());
+                    on_event(make_done_event(&req.session_id, final_text));
+                }
             }
             "error" => {
                 *saw_result = true;

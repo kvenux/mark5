@@ -16,10 +16,54 @@
   --accent-soft: rgba(201, 100, 66, 0.10);
   --success: #16a34a;
   --highlight-comment: #fef3c7;
+  --error-bg: #fef2f2;
+  --error-border: #fecaca;
+  --error-ink: #991b1b;
+  --error-btn-bg: #ffffff;
+  --error-btn-hover: #fee2e2;
+  --doc-icon-bg: #eff6ff;
   --shadow-card: 0 2px 10px rgba(26, 25, 24, 0.05);
   --shadow-pop: 0 10px 30px rgba(26, 25, 24, 0.12), 0 1px 3px rgba(26, 25, 24, 0.06);
   --editor-font-size: 15px;
   --editor-max-width: 720px;
+
+  /* Muya WYSIWYG theme tokens */
+  --theme-color: #c96442;
+  --highlight-color: rgba(201, 100, 66, 0.22);
+  --selection-color: rgba(201, 100, 66, 0.20);
+  --editor-bg-color: #ffffff;
+  --editor-color: #2d2c2a;
+  --editor-color-80: #1a1918;
+  --editor-color-50: #7d7a72;
+  --editor-color-30: #b5b2a8;
+  --editor-color-10: #eae8e1;
+  --editor-color-04: #f7f6f2;
+  --h1-color: #1a1918;
+  --h2-color: #1a1918;
+  --h3-color: #242321;
+  --h4-color: #2d2c2a;
+  --h5-color: #3a3835;
+  --h6-color: #5c5a54;
+  --strong-color: #1a1918;
+  --em-color: #2d2c2a;
+  --list-marker-color: #8c8880;
+  --link-color: #b45333;
+  --code-block-bg-color: #f6f5f0;
+  --code-block-color: #2d2c2a;
+  --table-border-color: #e4e2da;
+  --blockquote-text-color: #6b6860;
+  --blockquote-border-color: #d8d5cc;
+  --hr-color: #eae8e1;
+  --icon-color: #7d7a72;
+  --input-bg-color: rgba(26, 25, 24, 0.05);
+  --button-font-color: #2d2c2a;
+  --button-bg-color: #ffffff;
+  --button-border: 1px solid #dfddd5;
+  --button-bg-color-hover: #f4f3ee;
+  --float-bg-color: #ffffff;
+  --float-hover-color: rgba(26, 25, 24, 0.05);
+  --float-border-color: rgba(26, 25, 24, 0.10);
+  --float-shadow: 0 10px 30px rgba(26, 25, 24, 0.12), 0 1px 3px rgba(26, 25, 24, 0.06);
 }
 
 [data-theme='light'] {
@@ -39,8 +83,52 @@
   --accent-soft: rgba(37, 99, 235, 0.10);
   --success: #16a34a;
   --highlight-comment: #fef3c7;
+  --error-bg: #fef2f2;
+  --error-border: #fecaca;
+  --error-ink: #991b1b;
+  --error-btn-bg: #ffffff;
+  --error-btn-hover: #fee2e2;
+  --doc-icon-bg: #eff6ff;
   --shadow-card: 0 2px 10px rgba(17, 24, 39, 0.05);
   --shadow-pop: 0 10px 30px rgba(17, 24, 39, 0.12), 0 1px 3px rgba(17, 24, 39, 0.06);
+
+  /* Muya WYSIWYG theme tokens */
+  --theme-color: #2563eb;
+  --highlight-color: rgba(37, 99, 235, 0.20);
+  --selection-color: rgba(37, 99, 235, 0.18);
+  --editor-bg-color: #ffffff;
+  --editor-color: #1f2937;
+  --editor-color-80: #111827;
+  --editor-color-50: #6b7280;
+  --editor-color-30: #9ca3af;
+  --editor-color-10: #e5e7eb;
+  --editor-color-04: #f3f4f6;
+  --h1-color: #111827;
+  --h2-color: #111827;
+  --h3-color: #1f2937;
+  --h4-color: #1f2937;
+  --h5-color: #374151;
+  --h6-color: #4b5563;
+  --strong-color: #111827;
+  --em-color: #1f2937;
+  --list-marker-color: #6b7280;
+  --link-color: #2563eb;
+  --code-block-bg-color: #f6f8fa;
+  --code-block-color: #1f2937;
+  --table-border-color: #e5e7eb;
+  --blockquote-text-color: #4b5563;
+  --blockquote-border-color: #d1d5db;
+  --hr-color: #e5e7eb;
+  --icon-color: #6b7280;
+  --input-bg-color: rgba(17, 24, 39, 0.05);
+  --button-font-color: #1f2937;
+  --button-bg-color: #ffffff;
+  --button-border: 1px solid #dee2e6;
+  --button-bg-color-hover: #f1f3f5;
+  --float-bg-color: #ffffff;
+  --float-hover-color: rgba(17, 24, 39, 0.05);
+  --float-border-color: rgba(17, 24, 39, 0.10);
+  --float-shadow: 0 10px 30px rgba(17, 24, 39, 0.12), 0 1px 3px rgba(17, 24, 39, 0.06);
 }
 
 [data-theme='dark'] {
@@ -51,18 +139,62 @@
   --bg-active: #32323a;
   --border-hairline: #26262c;
   --border-soft: #34343d;
-  --ink-primary: #ecebe6;
-  --ink-body: #d4d3ce;
-  --ink-muted: #93918a;
-  --ink-faint: #6c6a64;
+  --ink-primary: #f2f0ea;
+  --ink-body: #d8d6cf;
+  --ink-muted: #9b9890;
+  --ink-faint: #6f6d66;
   --accent: #d97757;
   --accent-hover: #e08667;
   --accent-soft: rgba(217, 119, 87, 0.16);
   --success: #22c55e;
   --highlight-comment: rgba(250, 204, 21, 0.22);
+  --error-bg: rgba(127, 29, 29, 0.24);
+  --error-border: rgba(248, 113, 113, 0.32);
+  --error-ink: #fca5a5;
+  --error-btn-bg: rgba(255, 255, 255, 0.06);
+  --error-btn-hover: rgba(248, 113, 113, 0.18);
+  --doc-icon-bg: rgba(96, 165, 250, 0.14);
   --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.35);
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
+
+  /* Muya WYSIWYG dark theme tokens (high-contrast editorial readability) */
+  --theme-color: #d97757;
+  --highlight-color: rgba(217, 119, 87, 0.28);
+  --selection-color: rgba(217, 119, 87, 0.28);
+  --editor-bg-color: #141416;
+  --editor-color: #d8d6cf;
+  --editor-color-80: #f2f0ea;
+  --editor-color-50: #9b9890;
+  --editor-color-30: #5c5a54;
+  --editor-color-10: #2b2b32;
+  --editor-color-04: #1d1d22;
+  --h1-color: #f4f2ec;
+  --h2-color: #f0eee8;
+  --h3-color: #ebe9e2;
+  --h4-color: #e4e2db;
+  --h5-color: #d8d6cf;
+  --h6-color: #c2bfb7;
+  --strong-color: #f5f3ed;
+  --em-color: #e3e0d8;
+  --list-marker-color: #8f8c84;
+  --link-color: #6ea8fe;
+  --code-block-bg-color: #1c1c21;
+  --code-block-color: #e2e0da;
+  --table-border-color: #2e2e36;
+  --blockquote-text-color: #a8a59d;
+  --blockquote-border-color: #4d4b46;
+  --hr-color: #2b2b32;
+  --icon-color: #a8a59d;
+  --input-bg-color: rgba(255, 255, 255, 0.06);
+  --button-font-color: #e4e2dc;
+  --button-bg-color: #232329;
+  --button-border: 1px solid #34343e;
+  --button-bg-color-hover: #2d2d36;
+  --float-bg-color: #1f1f24;
+  --float-hover-color: rgba(255, 255, 255, 0.08);
+  --float-border-color: rgba(255, 255, 255, 0.12);
+  --float-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 * {
@@ -155,7 +287,18 @@ button.btn-primary:hover {
   outline: none;
   font-size: var(--editor-font-size, 15px);
   line-height: 1.82;
-  color: var(--ink-body);
+  color: var(--editor-color);
+  caret-color: var(--accent);
+}
+
+.muya-host .mu-editor p,
+.muya-host .mu-editor li {
+  color: var(--editor-color);
+}
+
+.muya-host .mu-editor strong {
+  color: var(--strong-color);
+  font-weight: 600;
 }
 
 .muya-host .mu-editor h1 {
@@ -163,7 +306,7 @@ button.btn-primary:hover {
   font-weight: 650;
   letter-spacing: -0.02em;
   line-height: 1.32;
-  color: var(--ink-primary);
+  color: var(--h1-color);
   margin: 0 0 12px;
 }
 
@@ -171,14 +314,40 @@ button.btn-primary:hover {
   font-size: 19px;
   font-weight: 600;
   letter-spacing: -0.01em;
-  color: var(--ink-primary);
+  color: var(--h2-color);
   margin: 26px 0 10px;
+}
+
+.muya-host .mu-editor h3 {
+  font-size: 16.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--h3-color);
+  margin: 20px 0 8px;
+}
+
+.muya-host .mu-editor h4,
+.muya-host .mu-editor h5,
+.muya-host .mu-editor h6 {
+  font-weight: 600;
+  color: var(--h4-color);
+  margin: 16px 0 6px;
+}
+
+.muya-host .mu-editor .mu-inline-code,
+.muya-host .mu-editor code:not(pre code) {
+  background: var(--code-block-bg-color);
+  color: var(--code-block-color);
+  border: 1px solid var(--border-hairline);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 0.9em;
 }
 
 .muya-host .mu-editor blockquote {
   position: relative;
   border-left: none;
-  color: var(--ink-muted);
+  color: var(--blockquote-text-color);
   padding-left: 22px;
   margin: 8px 0 16px;
 }
@@ -191,7 +360,7 @@ button.btn-primary:hover {
   bottom: 4px;
   width: 2.5px;
   border-radius: 2px;
-  background: var(--border-soft);
+  background: var(--blockquote-border-color);
 }
 
 /* Agent Active Line / Paragraph Highlight Overlay */

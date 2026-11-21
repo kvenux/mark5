@@ -1142,9 +1142,9 @@ watch(
 }
 .error-banner {
   font-size: 12.5px;
-  color: #991b1b;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  color: var(--error-ink);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
@@ -1168,12 +1168,12 @@ watch(
   padding: 3px 9px;
   border-radius: 6px;
   font-size: 11.5px;
-  color: #991b1b;
-  background: #ffffff;
-  border: 1px solid #fecaca;
+  color: var(--error-ink);
+  background: var(--error-btn-bg);
+  border: 1px solid var(--error-border);
 }
 .err-act-btn:hover:not(:disabled) {
-  background: #fee2e2;
+  background: var(--error-btn-hover);
 }
 .turn-doc-cards {
   display: flex;
@@ -1200,7 +1200,7 @@ watch(
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  background: #eff6ff;
+  background: var(--doc-icon-bg);
   display: flex;
   align-items: center;
   justify-content: center;
