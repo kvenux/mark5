@@ -79,25 +79,55 @@
       class="muya-scroll"
       @mouseup="handleSelectionMouseUp"
       @mousedown="handleEditorMouseDown"
+      @wheel.passive="onUserScroll"
+      @touchstart.passive="onUserScroll"
     >
       <div ref="hostWrapEl" class="muya-host">
-        <!-- Agent Active Line / Block Highlight Overlay -->
+        <!-- Agent Active Line / Block Highlight Overlay (HUD + Laser Scan + Live Typewriter) -->
         <div
           v-if="animState.visible"
           class="agent-highlight-box"
+          :class="[animState.phase]"
           :style="{
             top: animState.boxTop + 'px',
             left: animState.boxLeft + 'px',
             width: animState.boxWidth + 'px',
             height: animState.boxHeight + 'px'
           }"
-        />
+        >
+          <span class="hud-corner tl" />
+          <span class="hud-corner tr" />
+          <span class="hud-corner bl" />
+          <span class="hud-corner br" />
+          <div v-if="animState.phase === 'writing'" class="agent-scan-beam" />
+          <div v-if="animState.phase === 'settled'" class="agent-settled-sheen" />
+          <div
+            v-if="animState.showStream && animState.streamText"
+            ref="streamPreviewEl"
+            class="agent-stream-preview"
+          >
+            <span>{{ animState.streamText }}</span><span class="agent-caret" />
+          </div>
+          <div
+            v-if="animState.phase === 'writing'"
+            class="agent-progress-track"
+          >
+            <div
+              class="agent-progress-fill"
+              :style="{ width: animState.progress + '%' }"
+            />
+          </div>
+        </div>
 
         <!-- Interactive Floating Agent Cursor -->
         <div
           v-if="animState.visible"
           class="agent-floating-cursor"
-          :class="{ pinned: animState.pinned }"
+          :class="{
+            pinned: animState.pinned,
+            settled: animState.phase === 'settled',
+            fading: animState.phase === 'fading'
+          }"
           :style="{
             transform: `translate(${animState.cursorX}px, ${animState.cursorY}px)`
           }"
@@ -105,7 +135,8 @@
         >
           <div class="agent-cursor-pill">
             <span class="agent-cursor-dot" />
-            <span>{{ animState.label }}</span>
+            <span class="agent-cursor-label">{{ animState.label }}</span>
+            <span v-if="animState.badge" class="agent-cursor-badge">{{ animState.badge }}</span>
           </div>
           <div class="agent-cursor-inspector" @click.stop>
             <div style="color: #d6d3cb; margin-bottom: 8px">{{ animState.detail }}</div>
@@ -368,6 +399,7 @@ const store = useAppStore()
 const scrollEl = ref<HTMLElement | null>(null)
 const hostWrapEl = ref<HTMLElement | null>(null)
 const muyaContainerEl = ref<HTMLElement | null>(null)
+const streamPreviewEl = ref<HTMLElement | null>(null)
 const floatInputEl = ref<HTMLTextAreaElement | null>(null)
 
 const menuOpen = ref(false)
@@ -445,8 +477,13 @@ const animState = reactive({
   skip: false,
   pinned: false,
   activeBlockIndex: -1,
+  phase: 'lock' as 'lock' | 'writing' | 'settled' | 'fading',
+  progress: 0,
   label: '',
+  badge: '',
   detail: '',
+  streamText: '',
+  showStream: false,
   boxTop: 0,
   boxLeft: 0,
   boxWidth: 0,
@@ -454,6 +491,11 @@ const animState = reactive({
   cursorX: 0,
   cursorY: 0
 })
+
+let userScrollPausedUntil = 0
+function onUserScroll() {
+  userScrollPausedUntil = Date.now() + 3500
+}
 
 function ensureMuyaPlugins() {
   if (pluginsRegistered) return
@@ -644,26 +686,57 @@ function getTopBlockElements(): HTMLElement[] {
   return Array.from(editorRoot.children) as HTMLElement[]
 }
 
-function positionOverlayOnBlock(blockIndex: number, label: string, detail: string) {
+function scrollBlockToGoldenZone(target: HTMLElement) {
+  const scroller = scrollEl.value
+  if (!scroller || Date.now() < userScrollPausedUntil) return
+  const sRect = scroller.getBoundingClientRect()
+  const tRect = target.getBoundingClientRect()
+  const relTop = tRect.top - sRect.top
+  const viewH = scroller.clientHeight
+  // Keep calm if already inside the comfortable 18%..60% reading band
+  if (relTop >= viewH * 0.18 && relTop <= viewH * 0.6) return
+  const desiredTop = scroller.scrollTop + relTop - viewH * 0.38
+  scroller.scrollTo({
+    top: Math.max(0, desiredTop),
+    behavior: 'smooth'
+  })
+}
+
+function positionOverlayOnBlock(
+  blockIndex: number,
+  label: string,
+  detail: string,
+  shouldScroll = true
+) {
   const wrap = hostWrapEl.value
   const els = getTopBlockElements()
   const target = els[Math.min(Math.max(0, blockIndex), Math.max(0, els.length - 1))]
   if (!wrap || !target) return
 
-  target.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  if (shouldScroll) {
+    scrollBlockToGoldenZone(target)
+  }
   const wRect = wrap.getBoundingClientRect()
   const tRect = target.getBoundingClientRect()
 
-  animState.boxTop = Math.max(0, tRect.top - wRect.top - 4)
-  animState.boxLeft = Math.max(0, tRect.left - wRect.left - 8)
-  animState.boxWidth = tRect.width + 16
-  animState.boxHeight = Math.max(28, tRect.height + 8)
+  animState.boxTop = Math.max(0, tRect.top - wRect.top - 6)
+  animState.boxLeft = Math.max(0, tRect.left - wRect.left - 10)
+  animState.boxWidth = tRect.width + 20
+  animState.boxHeight = Math.max(36, tRect.height + 12)
   // Dock cursor pill neatly on the top-right edge of the highlighted block so it never overlaps headings above
-  animState.cursorX = Math.max(animState.boxLeft + 8, animState.boxLeft + animState.boxWidth - 132)
-  animState.cursorY = Math.max(0, animState.boxTop - 13)
+  animState.cursorX = Math.max(animState.boxLeft + 8, animState.boxLeft + animState.boxWidth - 186)
+  animState.cursorY = Math.max(0, animState.boxTop - 15)
   animState.label = label
   animState.detail = detail
   animState.visible = true
+}
+
+function formatReadableStreamText(rawMd: string): string {
+  return rawMd
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .trim()
 }
 
 function togglePause() {
@@ -733,31 +806,59 @@ async function drainOpQueue() {
         : Math.min(Math.max(0, op.blockIndex), Math.max(0, blocks.length - 1))
 
     animState.activeBlockIndex = targetIdx
-    positionOverlayOnBlock(targetIdx, op.label, `正在修改第 ${targetIdx + 1} 段`)
-    await sleep(360)
+    animState.phase = 'lock'
+    animState.progress = 0
+    animState.streamText = ''
+    animState.showStream = false
+    animState.badge = `§${targetIdx + 1}`
+    positionOverlayOnBlock(targetIdx, op.label, `锁定第 ${targetIdx + 1} 段`, true)
+    await sleep(420)
     while (animState.paused && animState.runId === myRunId) await sleep(80)
     if (animState.runId !== myRunId) return
 
-    if (op.type === 'replace_block') {
-      const els = getTopBlockElements()
-      const domEl = els[targetIdx]
-      if (domEl && !animState.skip) {
-        const plainPreview = op.newMarkdown.replace(/^#+\s*/, '')
-        const chunks = Math.min(18, Math.max(6, Math.ceil(plainPreview.length / 8)))
-        for (let c = 1; c <= chunks; c++) {
-          if (animState.runId !== myRunId || animState.skip) break
-          while (animState.paused && animState.runId === myRunId) await sleep(80)
-          positionOverlayOnBlock(
-            targetIdx,
-            op.label,
-            `写入中 (${Math.round((c / chunks) * 100)}%)`
-          )
-          await sleep(45)
+    if ((op.type === 'replace_block' || op.type === 'insert_block') && !animState.skip) {
+      const readable = formatReadableStreamText(op.newMarkdown)
+      const chars = Array.from(readable)
+      const totalChars = chars.length
+      // Adaptive cinematic pacing: 1.0s ~ 2.0s depending on length (slightly faster when queue has backlog)
+      const backlogFactor = store.pendingDocOps.length > 1 ? 0.72 : 1
+      const totalSteps = Math.min(44, Math.max(22, Math.ceil(totalChars / 4)))
+      const stepDelay = Math.round(36 * backlogFactor)
+
+      animState.phase = 'writing'
+      animState.showStream = totalChars > 0
+      for (let step = 1; step <= totalSteps; step++) {
+        if (animState.runId !== myRunId || animState.skip) break
+        while (animState.paused && animState.runId === myRunId) await sleep(80)
+        const ratio = step / totalSteps
+        // Ease-out curve for crisp, responsive feel
+        const eased = 1 - Math.pow(1 - ratio, 1.35)
+        const count = Math.min(totalChars, Math.max(1, Math.round(totalChars * eased)))
+        const pct = Math.round(ratio * 100)
+        animState.streamText = chars.slice(0, count).join('')
+        animState.progress = pct
+        animState.badge = `${pct}%`
+        animState.detail = `正在改写第 ${targetIdx + 1} 段 (${pct}%)`
+        await nextTick()
+        if (streamPreviewEl.value) {
+          const neededH = streamPreviewEl.value.scrollHeight + 14
+          if (neededH > animState.boxHeight) {
+            animState.boxHeight = neededH
+          }
         }
+        await sleep(stepDelay)
       }
+    } else if (op.type === 'delete_block' && !animState.skip) {
+      animState.phase = 'writing'
+      animState.badge = 'DEL'
+      animState.progress = 100
+      await sleep(520)
     }
 
     if (animState.runId !== myRunId) return
+
+    animState.showStream = false
+    animState.streamText = ''
 
     if (op.resultingMarkdown !== undefined) {
       // Authoritative snapshot already persisted by Main Process DocMcpServer;
@@ -778,14 +879,23 @@ async function drainOpQueue() {
     }
 
     await nextTick()
-    positionOverlayOnBlock(targetIdx, op.label, '完成')
-    await sleep(240)
+    animState.phase = 'settled'
+    animState.progress = 100
+    animState.badge = '✓'
+    positionOverlayOnBlock(targetIdx, op.label, '已完成更新', false)
+    await sleep(store.pendingDocOps.length > 0 ? 520 : 880)
   }
 
   if (animState.runId === myRunId) {
-    animState.running = false
-    animState.visible = false
-    animState.activeBlockIndex = -1
+    animState.phase = 'fading'
+    await sleep(520)
+    if (animState.runId === myRunId) {
+      animState.running = false
+      animState.visible = false
+      animState.activeBlockIndex = -1
+      animState.showStream = false
+      animState.streamText = ''
+    }
   }
 }
 
