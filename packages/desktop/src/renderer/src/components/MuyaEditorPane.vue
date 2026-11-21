@@ -83,7 +83,30 @@
       @touchstart.passive="onUserScroll"
     >
       <div ref="hostWrapEl" class="muya-host">
-        <!-- Agent Active Line / Block Highlight Overlay (HUD + Laser Scan + Live Typewriter) -->
+        <!-- Persistent Left-Gutter Change Bars (VS Code Git-diff style, quiet certainty) -->
+        <div
+          v-for="bar in changedBarRects"
+          :key="'chg-' + bar.blockIndex"
+          class="changed-gutter-bar"
+          :class="{ focused: reviewFocusIndex === bar.blockIndex }"
+          :style="{ top: bar.top + 'px', left: bar.left + 'px', height: bar.height + 'px' }"
+          :title="`本轮已修改（第 ${bar.blockIndex + 1} 段）`"
+          @click.stop="focusChangedBlock(bar.blockIndex)"
+        />
+
+        <!-- Brief Focus Highlight when stepping through changes via Review Bar -->
+        <div
+          v-if="reviewFocusBox.visible"
+          class="review-focus-box"
+          :style="{
+            top: reviewFocusBox.top + 'px',
+            left: reviewFocusBox.left + 'px',
+            width: reviewFocusBox.width + 'px',
+            height: reviewFocusBox.height + 'px'
+          }"
+        />
+
+        <!-- Agent Active Edit Overlay (Restrained Typora/Zed style + Real Typing Feel) -->
         <div
           v-if="animState.visible"
           class="agent-highlight-box"
@@ -95,12 +118,6 @@
             height: animState.boxHeight + 'px'
           }"
         >
-          <span class="hud-corner tl" />
-          <span class="hud-corner tr" />
-          <span class="hud-corner bl" />
-          <span class="hud-corner br" />
-          <div v-if="animState.phase === 'writing'" class="agent-scan-beam" />
-          <div v-if="animState.phase === 'settled'" class="agent-settled-sheen" />
           <div
             v-if="animState.showStream && animState.streamText"
             ref="streamPreviewEl"
@@ -108,43 +125,37 @@
           >
             <span>{{ animState.streamText }}</span><span class="agent-caret" />
           </div>
-          <div
-            v-if="animState.phase === 'writing'"
-            class="agent-progress-track"
-          >
-            <div
-              class="agent-progress-fill"
-              :style="{ width: animState.progress + '%' }"
-            />
-          </div>
         </div>
 
-        <!-- Interactive Floating Agent Cursor -->
+        <!-- Quiet Floating Agent Status Pill -->
         <div
           v-if="animState.visible"
           class="agent-floating-cursor"
           :class="{
-            pinned: animState.pinned,
             settled: animState.phase === 'settled',
             fading: animState.phase === 'fading'
           }"
           :style="{
             transform: `translate(${animState.cursorX}px, ${animState.cursorY}px)`
           }"
-          @click.stop="animState.pinned = !animState.pinned"
         >
           <div class="agent-cursor-pill">
             <span class="agent-cursor-dot" />
             <span class="agent-cursor-label">{{ animState.label }}</span>
             <span v-if="animState.badge" class="agent-cursor-badge">{{ animState.badge }}</span>
-          </div>
-          <div class="agent-cursor-inspector" @click.stop>
-            <div style="color: #d6d3cb; margin-bottom: 8px">{{ animState.detail }}</div>
-            <div style="display: flex; gap: 6px">
-              <button @click="togglePause">{{ animState.paused ? '继续' : '暂停' }}</button>
-              <button @click="skipCurrent">跳过</button>
-              <button @click="abortAnimation(true)">终止</button>
-            </div>
+            <template v-if="animState.phase === 'writing' || animState.phase === 'lock'">
+              <button class="pill-mini-btn" title="跳过本段动画" @click.stop="skipCurrent">
+                跳过
+              </button>
+              <button
+                v-if="animState.batchTotal > 1"
+                class="pill-mini-btn"
+                title="立即完成全部修改"
+                @click.stop="skipAllOps"
+              >
+                全部完成
+              </button>
+            </template>
           </div>
         </div>
 
@@ -339,6 +350,29 @@
         <button class="btn-primary" style="padding: 4px 10px" @click="submitThreadReply">发送</button>
       </div>
     </div>
+
+    <!-- Human-Centered Change Review Navigator (Shows exact modified count + step-through) -->
+    <div
+      v-if="changedBlocks.length > 0 && !animState.running && isMarkdownFile"
+      class="change-review-bar"
+      @click.stop
+    >
+      <span class="crb-dot" />
+      <span class="crb-label">本轮修改 {{ changedBlocks.length }} 处</span>
+      <div class="crb-nav">
+        <button class="crb-icon-btn" title="上一处修改" @click="stepChangedBlock(-1)">
+          <ChevronLeft :size="14" :stroke-width="2" />
+        </button>
+        <span class="crb-counter">{{ reviewPos + 1 }}/{{ changedBlocks.length }}</span>
+        <button class="crb-icon-btn" title="下一处修改" @click="stepChangedBlock(1)">
+          <ChevronRight :size="14" :stroke-width="2" />
+        </button>
+      </div>
+      <button class="crb-done-btn" title="标记为已审阅" @click="clearChangedReview">
+        <Check :size="13" :stroke-width="2.1" />
+        <span>完成审阅</span>
+      </button>
+    </div>
   </main>
 </template>
 
@@ -346,6 +380,9 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   Bold,
+  Check,
+  ChevronLeft,
+  ChevronRight,
   Code,
   Highlighter,
   Italic,
@@ -475,8 +512,11 @@ const animState = reactive({
   visible: false,
   paused: false,
   skip: false,
+  skipAll: false,
   pinned: false,
   activeBlockIndex: -1,
+  batchCurrent: 0,
+  batchTotal: 0,
   phase: 'lock' as 'lock' | 'writing' | 'settled' | 'fading',
   progress: 0,
   label: '',
@@ -491,6 +531,93 @@ const animState = reactive({
   cursorX: 0,
   cursorY: 0
 })
+
+// Persistent human-certainty change tracking (VS Code Git-gutter style + step-through review)
+const changedBlocks = ref<number[]>([])
+const reviewPos = ref(0)
+const reviewFocusIndex = ref(-1)
+const reviewFocusBox = reactive({
+  visible: false,
+  top: 0,
+  left: 0,
+  width: 0,
+  height: 0
+})
+let reviewFocusTimer: ReturnType<typeof setTimeout> | null = null
+
+const changedBarRects = computed(() => {
+  void marginTick.value
+  const wrap = hostWrapEl.value
+  const els = getTopBlockElements()
+  if (!wrap || els.length === 0 || changedBlocks.value.length === 0) return []
+  const wRect = wrap.getBoundingClientRect()
+  const out: Array<{ blockIndex: number; top: number; left: number; height: number }> = []
+  for (const idx of changedBlocks.value) {
+    const el = els[idx]
+    if (!el) continue
+    const tRect = el.getBoundingClientRect()
+    out.push({
+      blockIndex: idx,
+      top: Math.max(0, tRect.top - wRect.top + 2),
+      left: Math.max(0, tRect.left - wRect.left - 12),
+      height: Math.max(18, tRect.height - 4)
+    })
+  }
+  return out
+})
+
+function recordChangedBlock(idx: number) {
+  if (idx < 0) return
+  if (!changedBlocks.value.includes(idx)) {
+    changedBlocks.value = [...changedBlocks.value, idx].sort((a, b) => a - b)
+  }
+  marginTick.value += 1
+}
+
+function focusChangedBlock(blockIndex: number) {
+  const wrap = hostWrapEl.value
+  const els = getTopBlockElements()
+  const target = els[blockIndex]
+  if (!wrap || !target) return
+  const posIdx = changedBlocks.value.indexOf(blockIndex)
+  if (posIdx >= 0) reviewPos.value = posIdx
+  reviewFocusIndex.value = blockIndex
+  userScrollPausedUntil = 0
+  scrollBlockToGoldenZone(target)
+  const wRect = wrap.getBoundingClientRect()
+  const tRect = target.getBoundingClientRect()
+  reviewFocusBox.top = Math.max(0, tRect.top - wRect.top - 5)
+  reviewFocusBox.left = Math.max(0, tRect.left - wRect.left - 10)
+  reviewFocusBox.width = tRect.width + 20
+  reviewFocusBox.height = Math.max(30, tRect.height + 10)
+  reviewFocusBox.visible = true
+  if (reviewFocusTimer) clearTimeout(reviewFocusTimer)
+  reviewFocusTimer = setTimeout(() => {
+    reviewFocusBox.visible = false
+    reviewFocusIndex.value = -1
+  }, 1400)
+}
+
+function stepChangedBlock(delta: number) {
+  const len = changedBlocks.value.length
+  if (len === 0) return
+  reviewPos.value = (reviewPos.value + delta + len) % len
+  focusChangedBlock(changedBlocks.value[reviewPos.value])
+}
+
+function clearChangedReview() {
+  changedBlocks.value = []
+  reviewPos.value = 0
+  reviewFocusIndex.value = -1
+  reviewFocusBox.visible = false
+}
+
+watch(
+  () => store.activeDocRelPath,
+  () => {
+    clearChangedReview()
+  }
+)
 
 let userScrollPausedUntil = 0
 function onUserScroll() {
@@ -724,8 +851,8 @@ function positionOverlayOnBlock(
   animState.boxWidth = tRect.width + 20
   animState.boxHeight = Math.max(36, tRect.height + 12)
   // Dock cursor pill neatly on the top-right edge of the highlighted block so it never overlaps headings above
-  animState.cursorX = Math.max(animState.boxLeft + 8, animState.boxLeft + animState.boxWidth - 186)
-  animState.cursorY = Math.max(0, animState.boxTop - 15)
+  animState.cursorX = Math.max(animState.boxLeft + 8, animState.boxLeft + animState.boxWidth - 246)
+  animState.cursorY = Math.max(0, animState.boxTop - 26)
   animState.label = label
   animState.detail = detail
   animState.visible = true
@@ -739,12 +866,13 @@ function formatReadableStreamText(rawMd: string): string {
     .trim()
 }
 
-function togglePause() {
-  animState.paused = !animState.paused
-}
-
 function skipCurrent() {
   animState.skip = true
+}
+
+function skipAllOps() {
+  animState.skip = true
+  animState.skipAll = true
 }
 
 function abortAnimation(persistHumanContent = false) {
@@ -753,6 +881,7 @@ function abortAnimation(persistHumanContent = false) {
   animState.running = false
   animState.visible = false
   animState.pinned = false
+  animState.skipAll = false
   animState.activeBlockIndex = -1
   // Drop remaining queued ops for the active doc so they don't overwrite the human's edit
   if (store.activeDocRelPath) {
@@ -774,10 +903,17 @@ function handleEditorMouseDown(e: MouseEvent) {
   }
 }
 
+const PUNCT_PAUSE_RE = /[，。；：！？、,.;!?]/
+
 async function drainOpQueue() {
   const myRunId = ++animState.runId
   animState.running = true
   animState.paused = false
+  animState.skipAll = false
+  animState.batchCurrent = 0
+  animState.batchTotal = store.pendingDocOps.filter(
+    (x) => x.op.docRelPath === store.activeDocRelPath
+  ).length
 
   while (store.pendingDocOps.length > 0) {
     if (animState.runId !== myRunId) return
@@ -796,7 +932,13 @@ async function drainOpQueue() {
       continue
     }
 
-    animState.skip = false
+    animState.batchCurrent += 1
+    const remainingForDoc = store.pendingDocOps.filter(
+      (x) => x.op.docRelPath === store.activeDocRelPath
+    ).length
+    animState.batchTotal = Math.max(animState.batchTotal, animState.batchCurrent + remainingForDoc)
+
+    animState.skip = animState.skipAll
     const currentMd = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
     const blocks = splitTopBlocks(currentMd)
 
@@ -805,54 +947,68 @@ async function drainOpQueue() {
         ? Math.min(blocks.length, Math.max(0, op.afterBlockIndex + 1))
         : Math.min(Math.max(0, op.blockIndex), Math.max(0, blocks.length - 1))
 
-    animState.activeBlockIndex = targetIdx
-    animState.phase = 'lock'
-    animState.progress = 0
-    animState.streamText = ''
-    animState.showStream = false
-    animState.badge = `§${targetIdx + 1}`
-    positionOverlayOnBlock(targetIdx, op.label, `锁定第 ${targetIdx + 1} 段`, true)
-    await sleep(420)
-    while (animState.paused && animState.runId === myRunId) await sleep(80)
-    if (animState.runId !== myRunId) return
+    if (!animState.skipAll) {
+      animState.activeBlockIndex = targetIdx
+      animState.phase = 'lock'
+      animState.progress = 0
+      animState.streamText = ''
+      animState.showStream = false
+      animState.badge =
+        animState.batchTotal > 1 ? `${animState.batchCurrent}/${animState.batchTotal}` : ''
+      positionOverlayOnBlock(targetIdx, op.label, `定位第 ${targetIdx + 1} 段`, true)
+      await sleep(remainingForDoc >= 3 ? 220 : 380)
+      while (animState.paused && animState.runId === myRunId) await sleep(80)
+      if (animState.runId !== myRunId) return
+    }
 
     if ((op.type === 'replace_block' || op.type === 'insert_block') && !animState.skip) {
       const readable = formatReadableStreamText(op.newMarkdown)
       const chars = Array.from(readable)
       const totalChars = chars.length
-      // Adaptive cinematic pacing: 1.0s ~ 2.0s depending on length (slightly faster when queue has backlog)
-      const backlogFactor = store.pendingDocOps.length > 1 ? 0.72 : 1
-      const totalSteps = Math.min(44, Math.max(22, Math.ceil(totalChars / 4)))
-      const stepDelay = Math.round(36 * backlogFactor)
 
       animState.phase = 'writing'
       animState.showStream = totalChars > 0
-      for (let step = 1; step <= totalSteps; step++) {
-        if (animState.runId !== myRunId || animState.skip) break
-        while (animState.paused && animState.runId === myRunId) await sleep(80)
-        const ratio = step / totalSteps
-        // Ease-out curve for crisp, responsive feel
-        const eased = 1 - Math.pow(1 - ratio, 1.35)
-        const count = Math.min(totalChars, Math.max(1, Math.round(totalChars * eased)))
-        const pct = Math.round(ratio * 100)
-        animState.streamText = chars.slice(0, count).join('')
-        animState.progress = pct
-        animState.badge = `${pct}%`
-        animState.detail = `正在改写第 ${targetIdx + 1} 段 (${pct}%)`
-        await nextTick()
-        if (streamPreviewEl.value) {
-          const neededH = streamPreviewEl.value.scrollHeight + 14
-          if (neededH > animState.boxHeight) {
-            animState.boxHeight = neededH
+
+      if (remainingForDoc >= 3) {
+        // High backlog: fast smooth reveal (~450ms) so user never feels stuck waiting
+        const fastSteps = Math.min(16, Math.max(8, totalChars))
+        for (let s = 1; s <= fastSteps; s++) {
+          if (animState.runId !== myRunId || animState.skip) break
+          const count = Math.min(totalChars, Math.ceil((totalChars * s) / fastSteps))
+          animState.streamText = chars.slice(0, count).join('')
+          await nextTick()
+          if (streamPreviewEl.value) {
+            const neededH = streamPreviewEl.value.offsetHeight + 8
+            if (neededH > animState.boxHeight) animState.boxHeight = neededH
           }
+          await sleep(28)
         }
-        await sleep(stepDelay)
+      } else {
+        // Human-readable real typing cadence (~20 chars/sec, ~32 chars/sec with slight backlog)
+        const baseMsPerChar = remainingForDoc >= 1 ? 30 : 46
+        // Cap total duration at ~4.2s for very long paragraphs by emitting 2 chars/tick if needed
+        const maxDurationMs = remainingForDoc >= 1 ? 2400 : 4200
+        const charsPerTick = Math.max(1, Math.ceil((totalChars * baseMsPerChar) / maxDurationMs))
+        const tickDelay = Math.max(24, Math.min(baseMsPerChar, Math.round(maxDurationMs / Math.max(1, totalChars / charsPerTick))))
+
+        for (let i = charsPerTick; i <= totalChars + charsPerTick - 1; i += charsPerTick) {
+          if (animState.runId !== myRunId || animState.skip) break
+          while (animState.paused && animState.runId === myRunId) await sleep(80)
+          const count = Math.min(totalChars, i)
+          animState.streamText = chars.slice(0, count).join('')
+          await nextTick()
+          if (streamPreviewEl.value) {
+            const neededH = streamPreviewEl.value.offsetHeight + 8
+            if (neededH > animState.boxHeight) animState.boxHeight = neededH
+          }
+          const lastChar = chars[count - 1] || ''
+          const extraPause = charsPerTick === 1 && PUNCT_PAUSE_RE.test(lastChar) ? 85 : 0
+          await sleep(tickDelay + extraPause)
+        }
       }
     } else if (op.type === 'delete_block' && !animState.skip) {
       animState.phase = 'writing'
-      animState.badge = 'DEL'
-      animState.progress = 100
-      await sleep(520)
+      await sleep(360)
     }
 
     if (animState.runId !== myRunId) return
@@ -879,22 +1035,30 @@ async function drainOpQueue() {
     }
 
     await nextTick()
-    animState.phase = 'settled'
-    animState.progress = 100
-    animState.badge = '✓'
-    positionOverlayOnBlock(targetIdx, op.label, '已完成更新', false)
-    await sleep(store.pendingDocOps.length > 0 ? 520 : 880)
+    if (op.type !== 'delete_block') {
+      recordChangedBlock(targetIdx)
+    }
+
+    if (!animState.skipAll) {
+      animState.phase = 'settled'
+      positionOverlayOnBlock(targetIdx, '已更新', '', false)
+      await sleep(store.pendingDocOps.length > 0 ? 420 : 680)
+    }
   }
 
   if (animState.runId === myRunId) {
-    animState.phase = 'fading'
-    await sleep(520)
+    if (!animState.skipAll && animState.visible) {
+      animState.phase = 'fading'
+      await sleep(540)
+    }
     if (animState.runId === myRunId) {
       animState.running = false
       animState.visible = false
+      animState.skipAll = false
       animState.activeBlockIndex = -1
       animState.showStream = false
       animState.streamText = ''
+      marginTick.value += 1
     }
   }
 }
