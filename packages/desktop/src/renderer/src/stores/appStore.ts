@@ -650,13 +650,35 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function ensureSessionForDocument(docRelPath: string): Promise<SessionRecord | null> {
+    if (!activeWorkspace.value) return null
+    const cur = activeSession.value
+    if (cur && !cur.archived && cur.docRelPath === docRelPath) {
+      return cur
+    }
+    const matched = sessions.value
+      .filter((s) => !s.archived && s.docRelPath === docRelPath)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (matched) {
+      activeSessionId.value = matched.id
+      return matched
+    }
+    const baseName = docRelPath.split('/').pop() || docRelPath
+    const title = baseName.replace(/\.(md|markdown)$/i, '') || '文档批注'
+    const created = await createSession(title, preferredEngine.value)
+    if (!created) return null
+    created.docRelPath = docRelPath
+    await window.mark5.saveSession(
+      activeWorkspace.value.rootPath,
+      JSON.parse(JSON.stringify(created))
+    )
+    return created
+  }
+
   async function sendSelectionComment(blockIndex: number, quote: string, text: string) {
     if (!activeWorkspace.value || !activeDocRelPath.value) return
-    let sess = activeSession.value
-    if (!sess) {
-      sess = await createSession(activeDocRelPath.value.replace(/\.md$/i, ''), preferredEngine.value)
-      if (!sess) return
-    }
+    const sess = await ensureSessionForDocument(activeDocRelPath.value)
+    if (!sess) return
 
     const rand = Math.random().toString(36).slice(2, 6)
     const thread: CommentThread = {
@@ -685,13 +707,12 @@ export const useAppStore = defineStore('app', () => {
     sessionBusyMap.value[targetSessionId] = true
     sessionLiveStatusMap.value[targetSessionId] = '正在处理批注...'
     try {
-      const targetSess = activeSession.value
-      const eng: AgentEngine = targetSess?.engine || 'agy'
+      const eng: AgentEngine = sess.engine || 'agy'
       await window.mark5.sendAgentTurn({
         sessionId: targetSessionId,
         rootPath: activeWorkspace.value.rootPath,
         prompt: text,
-        model: targetSess?.model || settings.value.models[eng] || undefined,
+        model: sess.model || settings.value.models[eng] || undefined,
         cliPath: settings.value.cliPaths[eng] || undefined,
         docRelPath: activeDocRelPath.value,
         currentMarkdown: markdown.value,
@@ -715,7 +736,9 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function replyInThread(threadId: string, text: string) {
-    if (!activeWorkspace.value || !activeDocRelPath.value || !activeSession.value) return
+    if (!activeWorkspace.value || !activeDocRelPath.value) return
+    const sess = await ensureSessionForDocument(activeDocRelPath.value)
+    if (!sess) return
     const thread = threads.value.find((t) => t.id === threadId)
     if (!thread) return
     thread.messages.push({
@@ -726,19 +749,18 @@ export const useAppStore = defineStore('app', () => {
     })
     await persistThreads()
 
-    const targetSessionId = activeSession.value.id
+    const targetSessionId = sess.id
     const mySeq = (sessionTurnSeqMap.get(targetSessionId) ?? 0) + 1
     sessionTurnSeqMap.set(targetSessionId, mySeq)
     sessionBusyMap.value[targetSessionId] = true
     sessionLiveStatusMap.value[targetSessionId] = '正在回复批注...'
     try {
-      const targetSess = activeSession.value
-      const eng: AgentEngine = targetSess?.engine || 'agy'
+      const eng: AgentEngine = sess.engine || 'agy'
       await window.mark5.sendAgentTurn({
         sessionId: targetSessionId,
         rootPath: activeWorkspace.value.rootPath,
         prompt: text,
-        model: targetSess?.model || settings.value.models[eng] || undefined,
+        model: sess.model || settings.value.models[eng] || undefined,
         cliPath: settings.value.cliPaths[eng] || undefined,
         docRelPath: activeDocRelPath.value,
         currentMarkdown: markdown.value,

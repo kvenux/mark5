@@ -920,25 +920,11 @@ function recordPendingChange(
   label: string
 ) {
   if (blockIndex < 0) return
-  if (type === 'insert_block') {
-    for (const c of pendingChanges.value) {
-      if (c.blockIndex >= blockIndex) c.blockIndex += 1
-    }
-  } else if (type === 'delete_block') {
+
+  if (type === 'delete_block') {
     for (const c of pendingChanges.value) {
       if (c.blockIndex > blockIndex) c.blockIndex -= 1
     }
-  }
-
-  const existing =
-    type === 'replace_block'
-      ? pendingChanges.value.find((c) => c.blockIndex === blockIndex && c.type !== 'delete_block')
-      : undefined
-  if (existing) {
-    // Preserve true pre-turn oldMarkdown if same block edited twice in one turn
-    existing.newMarkdown = newMarkdown
-    existing.label = label
-  } else {
     pendingChanges.value = [
       ...pendingChanges.value,
       {
@@ -946,10 +932,79 @@ function recordPendingChange(
         blockIndex,
         type,
         oldMarkdown,
-        newMarkdown,
+        newMarkdown: '',
         label
       }
     ].sort((a, b) => a.blockIndex - b.blockIndex)
+    marginTick.value += 1
+    return
+  }
+
+  // Split multi-paragraph inserts/replacements (e.g. inserting an entire chapter at once!)
+  // so EVERY newly created top-level block gets its own gutter bar & Diff review entry.
+  const subBlocks = splitTopBlocks(newMarkdown)
+  const parts = subBlocks.length > 0 ? subBlocks : [newMarkdown]
+
+  if (type === 'insert_block') {
+    const shift = parts.length
+    for (const c of pendingChanges.value) {
+      if (c.blockIndex >= blockIndex) c.blockIndex += shift
+    }
+    const added: PendingBlockChange[] = parts.map((partMd, offset) => ({
+      id: `chg-${Date.now().toString(36)}-${offset}-${Math.random().toString(36).slice(2, 5)}`,
+      blockIndex: blockIndex + offset,
+      type: 'insert_block',
+      oldMarkdown: '',
+      newMarkdown: partMd,
+      label
+    }))
+    pendingChanges.value = [...pendingChanges.value, ...added].sort(
+      (a, b) => a.blockIndex - b.blockIndex
+    )
+    marginTick.value += 1
+    return
+  }
+
+  // replace_block: first block replaces oldMarkdown; any extra blocks (parts.length > 1) are tracked as insert_block
+  const extraCount = parts.length - 1
+  if (extraCount > 0) {
+    for (const c of pendingChanges.value) {
+      if (c.blockIndex > blockIndex) c.blockIndex += extraCount
+    }
+  }
+
+  const existing = pendingChanges.value.find(
+    (c) => c.blockIndex === blockIndex && c.type !== 'delete_block'
+  )
+  const additions: PendingBlockChange[] = []
+  if (existing) {
+    // Preserve true pre-turn oldMarkdown if same block edited twice in one turn
+    existing.newMarkdown = parts[0]
+    existing.label = label
+  } else {
+    additions.push({
+      id: `chg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      blockIndex,
+      type: 'replace_block',
+      oldMarkdown,
+      newMarkdown: parts[0],
+      label
+    })
+  }
+  for (let offset = 1; offset < parts.length; offset++) {
+    additions.push({
+      id: `chg-${Date.now().toString(36)}-${offset}-${Math.random().toString(36).slice(2, 5)}`,
+      blockIndex: blockIndex + offset,
+      type: 'insert_block',
+      oldMarkdown: '',
+      newMarkdown: parts[offset],
+      label
+    })
+  }
+  if (additions.length > 0) {
+    pendingChanges.value = [...pendingChanges.value, ...additions].sort(
+      (a, b) => a.blockIndex - b.blockIndex
+    )
   }
   marginTick.value += 1
 }
