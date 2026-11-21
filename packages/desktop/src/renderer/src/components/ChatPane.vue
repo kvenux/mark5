@@ -1684,6 +1684,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1;
   min-width: 0;
 }
 .engine-select {
@@ -1713,7 +1714,9 @@ watch(
 }
 .model-picker-wrap {
   position: relative;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 150px;
 }
 .model-chip {
   display: inline-flex;
@@ -1725,8 +1728,8 @@ watch(
   border-radius: 6px;
   border: 1px solid var(--border-hairline);
   background: transparent;
-  max-width: 165px;
-  flex-shrink: 0;
+  max-width: 100%;
+  min-width: 0;
 }
 .model-chip-text {
   overflow: hidden;
@@ -1868,14 +1871,21 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 180px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 2px 7px;
   border-radius: 6px;
   font-size: 11.5px;
   color: var(--ink-muted);
   background: transparent;
 }
+.context-doc-chip svg {
+  flex-shrink: 0;
+}
 .context-doc-chip span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
