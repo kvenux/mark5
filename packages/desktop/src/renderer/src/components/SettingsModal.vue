@@ -123,13 +123,21 @@
               />
               <div class="preset-row">
                 <button
-                  v-for="p in eng.presets"
-                  :key="p"
                   class="preset-chip"
-                  :class="{ active: store.settings.models[eng.id] === p }"
-                  @click="setModel(eng.id, p)"
+                  :class="{ active: !store.settings.models[eng.id] }"
+                  @click="setModel(eng.id, '')"
                 >
-                  {{ p || '默认' }}
+                  默认
+                </button>
+                <button
+                  v-for="m in livePresetsFor(eng.id)"
+                  :key="m.id"
+                  class="preset-chip"
+                  :class="{ active: store.settings.models[eng.id] === m.id }"
+                  :title="m.id"
+                  @click="setModel(eng.id, m.id)"
+                >
+                  {{ m.label }}
                 </button>
               </div>
               <div class="s-sub-label">自定义可执行路径（可选，留空自动探测）</div>
@@ -216,6 +224,13 @@ function engineTitle(id: string) {
   return 'AGY'
 }
 
+function livePresetsFor(eng: AgentEngine) {
+  const live = store.engineModels[eng] || []
+  if (live.length > 0) return live.slice(0, 8)
+  const fallback = engines.find((e) => e.id === eng)?.presets.filter(Boolean) || []
+  return fallback.map((id) => ({ id, label: id }))
+}
+
 function setModel(eng: AgentEngine, val: string) {
   store.updateSettings({
     models: { ...store.settings.models, [eng]: val }
@@ -233,6 +248,11 @@ function onPathInput(eng: AgentEngine, e: Event) {
 }
 
 async function runCheckCli() {
+  void Promise.all([
+    store.fetchEngineModels('agy'),
+    store.fetchEngineModels('claude'),
+    store.fetchEngineModels('codex')
+  ])
   if (!window.mark5.checkCliStatus) return
   checkingCli.value = true
   try {

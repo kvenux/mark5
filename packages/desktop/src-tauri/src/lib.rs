@@ -14,8 +14,8 @@ use crate::agy_adapter::{resolve_claude_bin, resolve_codex_bin, AgyAdapter};
 use crate::mcp_server::{resolve_agy_bin, DocMcpServer};
 use crate::types::{
     CliStatusItem, CommentThread, CreateSessionPayload, ExportDocPayload, ExportDocResult,
-    FileEntry, HistorySnapshot, SaveHistoryPayload, SendAgentTurnPayload, SessionRecord,
-    WorkspaceInfo,
+    FileEntry, HistorySnapshot, ModelOption, SaveHistoryPayload, SendAgentTurnPayload,
+    SessionRecord, WorkspaceInfo,
 };
 use crate::workspace::WorkspaceManager;
 
@@ -462,6 +462,153 @@ async fn check_cli_status(
     Ok(out)
 }
 
+fn user_home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)
+}
+
+#[tauri::command]
+async fn list_engine_models(
+    engine: String,
+    cli_path: Option<String>,
+) -> Result<Vec<ModelOption>, String> {
+    let eng = engine.trim().to_lowercase();
+    match eng.as_str() {
+        "agy" => {
+            let bin = cli_path
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(resolve_agy_bin);
+            let mut cmd = tokio::process::Command::new(&bin);
+            cmd.arg("models");
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(0x08000000);
+            let mut out = Vec::new();
+            if let Ok(res) = cmd.output().await {
+                if res.status.success() {
+                    let stdout = String::from_utf8_lossy(&res.stdout);
+                    for line in stdout.lines() {
+                        let trimmed = line.trim();
+                        if let Some((id, label)) = trimmed.split_once('\t') {
+                            let id_s = id.trim();
+                            let label_s = label.trim();
+                            if !id_s.is_empty() {
+                                out.push(ModelOption {
+                                    id: id_s.to_string(),
+                                    label: if label_s.is_empty() {
+                                        id_s.to_string()
+                                    } else {
+                                        label_s.to_string()
+                                    },
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(out)
+        }
+        "codex" => {
+            let mut out = Vec::new();
+            if let Some(home) = user_home_dir() {
+                let cache_path = home.join(".codex").join("models_cache.json");
+                if let Ok(raw) = tokio::fs::read_to_string(&cache_path).await {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Some(arr) = val.get("models").and_then(|v| v.as_array()) {
+                            for item in arr {
+                                let vis = item
+                                    .get("visibility")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("list");
+                                if vis == "hide" {
+                                    continue;
+                                }
+                                if let Some(slug) = item.get("slug").and_then(|v| v.as_str()) {
+                                    let label = item
+                                        .get("display_name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or(slug);
+                                    out.push(ModelOption {
+                                        id: slug.to_string(),
+                                        label: label.to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if out.is_empty() {
+                for (id, label) in [
+                    ("o3", "o3"),
+                    ("o4-mini", "o4-mini"),
+                    ("gpt-5", "GPT-5"),
+                    ("gpt-5-codex", "GPT-5 Codex"),
+                ] {
+                    out.push(ModelOption {
+                        id: id.to_string(),
+                        label: label.to_string(),
+                    });
+                }
+            }
+            Ok(out)
+        }
+        "claude" => {
+            let mut out: Vec<ModelOption> = vec![
+                ModelOption {
+                    id: "opus".to_string(),
+                    label: "Claude Opus (Latest)".to_string(),
+                },
+                ModelOption {
+                    id: "sonnet".to_string(),
+                    label: "Claude Sonnet (Latest)".to_string(),
+                },
+                ModelOption {
+                    id: "haiku".to_string(),
+                    label: "Claude Haiku (Latest)".to_string(),
+                },
+                ModelOption {
+                    id: "fable".to_string(),
+                    label: "Claude Fable (Latest)".to_string(),
+                },
+            ];
+            if let Some(home) = user_home_dir() {
+                let settings_path = home.join(".claude").join("settings.json");
+                if let Ok(raw) = tokio::fs::read_to_string(&settings_path).await {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Some(arr) = val.get("availableModels").and_then(|v| v.as_array()) {
+                            for item in arr {
+                                if let Some(m) = item.as_str() {
+                                    if !m.trim().is_empty() && !out.iter().any(|x| x.id == m) {
+                                        out.push(ModelOption {
+                                            id: m.to_string(),
+                                            label: m.to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(cur) = val.get("model").and_then(|v| v.as_str()) {
+                            let c = cur.trim();
+                            if !c.is_empty() && !out.iter().any(|x| x.id == c) {
+                                out.insert(
+                                    0,
+                                    ModelOption {
+                                        id: c.to_string(),
+                                        label: format!("{c} (当前配置)"),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(out)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
 #[tauri::command]
 async fn open_new_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let idx = state.win_counter.fetch_add(1, Ordering::SeqCst) + 1;
@@ -527,6 +674,7 @@ pub fn run() {
             abort_agent_turn,
             export_document,
             check_cli_status,
+            list_engine_models,
             open_new_window,
         ])
         .build(tauri::generate_context!())

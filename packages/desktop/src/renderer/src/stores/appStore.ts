@@ -8,6 +8,7 @@ import type {
   CommentThread,
   FileEntry,
   HistorySnapshot,
+  ModelOption,
   SessionRecord,
   WorkspaceInfo
 } from '@shared/types'
@@ -63,7 +64,51 @@ export const useAppStore = defineStore('app', () => {
   const activeSessionId = ref<string | null>(null)
   const settings = ref<AppSettings>(loadSavedSettings())
   const preferredEngine = ref<AgentEngine>(settings.value.defaultEngine)
+  const engineModels = ref<Record<AgentEngine, ModelOption[]>>({
+    agy: [],
+    claude: [],
+    codex: []
+  })
+  const modelsLoading = ref<Record<AgentEngine, boolean>>({
+    agy: false,
+    claude: false,
+    codex: false
+  })
+  const modelsFetched = new Set<AgentEngine>()
   applyThemeToDom(settings.value)
+
+  async function fetchEngineModels(engine: AgentEngine, force = false) {
+    if (!force && (modelsFetched.has(engine) || modelsLoading.value[engine])) return
+    if (!window.mark5.listEngineModels) return
+    modelsLoading.value[engine] = true
+    try {
+      const cliPath = settings.value.cliPaths[engine] || undefined
+      const list = await window.mark5.listEngineModels(engine, cliPath)
+      engineModels.value[engine] = list
+      modelsFetched.add(engine)
+    } catch {
+      // Keep existing cached list on failure
+    } finally {
+      modelsLoading.value[engine] = false
+    }
+  }
+
+  async function setActiveModel(engine: AgentEngine, modelId: string) {
+    const clean = modelId.trim()
+    updateSettings({
+      models: {
+        ...settings.value.models,
+        [engine]: clean
+      }
+    })
+    const sess = activeSession.value
+    if (sess && sess.engine === engine) {
+      sess.model = clean || undefined
+      if (activeWorkspace.value) {
+        await window.mark5.saveSession(activeWorkspace.value.rootPath, JSON.parse(JSON.stringify(sess)))
+      }
+    }
+  }
 
   function updateSettings(patch: Partial<AppSettings>) {
     settings.value = {
@@ -944,6 +989,10 @@ export const useAppStore = defineStore('app', () => {
     activeSession,
     settings,
     updateSettings,
+    engineModels,
+    modelsLoading,
+    fetchEngineModels,
+    setActiveModel,
     preferredEngine,
     setActiveSessionEngine,
     openTabs,

@@ -281,13 +281,97 @@
             <span v-else class="engine-label" title="本会话已绑定的 AI 引擎">
               {{ engineLabel(currentEngine) }}
             </span>
-            <button
-              class="model-chip"
-              :title="`当前模型参数：${activeModelDisplay}（点击配置）`"
-              @click="$emit('open-model-settings')"
-            >
-              {{ activeModelDisplay }}
-            </button>
+            <div ref="modelPickerEl" class="model-picker-wrap">
+              <button
+                class="model-chip"
+                :class="{ open: modelMenuOpen }"
+                :title="`当前模型：${activeModelDisplay}（点击切换）`"
+                @click.stop="toggleModelMenu"
+              >
+                <span class="model-chip-text">{{ activeModelDisplay }}</span>
+                <ChevronDown :size="11" :stroke-width="1.9" class="model-chip-caret" />
+              </button>
+              <div v-if="modelMenuOpen" class="model-popover" @click.stop>
+                <div class="model-pop-head">
+                  <input
+                    ref="modelFilterInputEl"
+                    v-model="modelQuery"
+                    class="model-filter-input"
+                    placeholder="筛选或输入模型 ID…"
+                    @keydown.enter.prevent="onModelFilterEnter"
+                    @keydown.escape.prevent="modelMenuOpen = false"
+                  />
+                  <button
+                    class="model-refresh-btn"
+                    :disabled="store.modelsLoading[currentEngine]"
+                    title="从 CLI 刷新可用模型列表"
+                    @click="store.fetchEngineModels(currentEngine, true)"
+                  >
+                    <RefreshCw
+                      :size="12"
+                      :stroke-width="1.9"
+                      :class="{ spin: store.modelsLoading[currentEngine] }"
+                    />
+                  </button>
+                </div>
+                <div class="model-pop-list">
+                  <button
+                    v-if="!modelQuery.trim()"
+                    class="model-opt"
+                    :class="{ active: !activeModelId }"
+                    @click="pickModel('')"
+                  >
+                    <div class="model-opt-main">
+                      <span class="model-opt-label">默认模型</span>
+                      <span class="model-opt-sub">跟随 {{ engineLabel(currentEngine) }} CLI 默认配置</span>
+                    </div>
+                    <Check v-if="!activeModelId" :size="13" :stroke-width="2.2" class="model-opt-check" />
+                  </button>
+
+                  <div
+                    v-if="store.modelsLoading[currentEngine] && filteredModels.length === 0"
+                    class="model-pop-empty"
+                  >
+                    正在从 {{ engineLabel(currentEngine) }} CLI 获取模型列表…
+                  </div>
+
+                  <button
+                    v-for="m in filteredModels"
+                    :key="m.id"
+                    class="model-opt"
+                    :class="{ active: activeModelId === m.id }"
+                    @click="pickModel(m.id)"
+                  >
+                    <div class="model-opt-main">
+                      <span class="model-opt-label">{{ m.label }}</span>
+                      <span v-if="m.label !== m.id" class="model-opt-sub">{{ m.id }}</span>
+                    </div>
+                    <Check v-if="activeModelId === m.id" :size="13" :stroke-width="2.2" class="model-opt-check" />
+                  </button>
+
+                  <button
+                    v-if="
+                      modelQuery.trim() &&
+                      !filteredModels.some((m) => m.id.toLowerCase() === modelQuery.trim().toLowerCase())
+                    "
+                    class="model-opt custom-opt"
+                    @click="pickModel(modelQuery.trim())"
+                  >
+                    <div class="model-opt-main">
+                      <span class="model-opt-label">使用自定义模型</span>
+                      <span class="model-opt-sub">{{ modelQuery.trim() }}</span>
+                    </div>
+                  </button>
+
+                  <div
+                    v-if="!store.modelsLoading[currentEngine] && filteredModels.length === 0 && !modelQuery.trim()"
+                    class="model-pop-empty"
+                  >
+                    未获取到模型列表，可直接输入模型 ID 或点右上角刷新
+                  </div>
+                </div>
+              </div>
+            </div>
             <button
               v-if="contextDocRelPath"
               class="context-doc-chip"
@@ -317,18 +401,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  ChevronDown,
   Copy,
   FilePlus2,
   FileText,
   PanelLeftOpen,
   Pencil,
   Quote,
+  RefreshCw,
   RotateCcw,
   Square,
   X
@@ -365,9 +452,72 @@ const messages = computed(() => store.activeSession?.messages || [])
 const currentEngine = computed<AgentEngine>(
   () => store.activeSession?.engine || store.preferredEngine || 'agy'
 )
-const activeModelDisplay = computed(() => {
+const modelMenuOpen = ref(false)
+const modelQuery = ref('')
+const modelPickerEl = ref<HTMLElement | null>(null)
+const modelFilterInputEl = ref<HTMLInputElement | null>(null)
+
+const activeModelId = computed(() => {
   const m = store.activeSession?.model || store.settings.models[currentEngine.value]
-  return m && m.trim() ? m.trim() : '默认模型'
+  return m && m.trim() ? m.trim() : ''
+})
+const activeModelDisplay = computed(() => {
+  const id = activeModelId.value
+  if (!id) return '默认模型'
+  const found = (store.engineModels[currentEngine.value] || []).find((x) => x.id === id)
+  return found ? found.label : id
+})
+const filteredModels = computed(() => {
+  const list = store.engineModels[currentEngine.value] || []
+  const q = modelQuery.value.trim().toLowerCase()
+  if (!q) return list
+  return list.filter(
+    (m) => m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
+  )
+})
+
+function toggleModelMenu() {
+  modelMenuOpen.value = !modelMenuOpen.value
+  if (modelMenuOpen.value) {
+    modelQuery.value = ''
+    void store.fetchEngineModels(currentEngine.value)
+    nextTick(() => modelFilterInputEl.value?.focus())
+  }
+}
+
+async function pickModel(modelId: string) {
+  await store.setActiveModel(currentEngine.value, modelId)
+  modelMenuOpen.value = false
+  modelQuery.value = ''
+}
+
+function onModelFilterEnter() {
+  const q = modelQuery.value.trim()
+  if (filteredModels.value.length > 0) {
+    void pickModel(filteredModels.value[0].id)
+  } else if (q) {
+    void pickModel(q)
+  }
+}
+
+function onDocClickForModelMenu(ev: MouseEvent) {
+  if (!modelMenuOpen.value) return
+  if (modelPickerEl.value && !modelPickerEl.value.contains(ev.target as Node)) {
+    modelMenuOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocClickForModelMenu)
+  void store.fetchEngineModels(currentEngine.value)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClickForModelMenu)
+})
+
+watch(currentEngine, (eng) => {
+  void store.fetchEngineModels(eng)
 })
 const contextDocRelPath = computed(
   () => store.activeDocRelPath || store.activeSession?.docRelPath || null
@@ -1395,22 +1545,158 @@ watch(
   background: var(--bg-subtle);
   flex-shrink: 0;
 }
+.model-picker-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
 .model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--ink-muted);
   padding: 2px 7px;
   border-radius: 6px;
   border: 1px solid var(--border-hairline);
   background: transparent;
-  max-width: 120px;
+  max-width: 165px;
+  flex-shrink: 0;
+}
+.model-chip-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.model-chip-caret {
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: transform 0.14s ease;
+}
+.model-chip.open .model-chip-caret {
+  transform: rotate(180deg);
+}
+.model-chip:hover,
+.model-chip.open {
+  background: var(--bg-subtle);
+  border-color: var(--border-soft);
+  color: var(--ink-primary);
+}
+.model-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 280px;
+  max-height: 320px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 80;
+}
+.model-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.model-filter-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--border-hairline);
+  background: var(--bg-sidebar);
+  color: var(--ink-primary);
+  outline: none;
+}
+.model-filter-input:focus {
+  border-color: var(--accent);
+}
+.model-refresh-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
   flex-shrink: 0;
 }
-.model-chip:hover {
-  background: var(--bg-subtle);
+.model-refresh-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
   color: var(--ink-primary);
+}
+.model-refresh-btn .spin {
+  animation: mcSpin 0.8s linear infinite;
+}
+@keyframes mcSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.model-pop-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.model-opt {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  color: var(--ink-body);
+}
+.model-opt:hover {
+  background: var(--bg-hover);
+  color: var(--ink-primary);
+}
+.model-opt.active {
+  background: var(--accent-soft);
+  color: var(--ink-primary);
+}
+.model-opt-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.model-opt-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-opt-sub {
+  font-size: 10.5px;
+  color: var(--ink-muted);
+  font-family: Consolas, 'JetBrains Mono', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-opt-check {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.model-pop-empty {
+  padding: 16px 10px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--ink-muted);
 }
 .context-doc-chip {
   display: inline-flex;

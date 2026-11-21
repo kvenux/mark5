@@ -17,6 +17,11 @@ export interface CliStatusItem {
   resolvedPath: string
 }
 
+export interface ModelOption {
+  id: string
+  label: string
+}
+
 export interface WorkspaceInfo {
   id: string
   name: string
@@ -246,6 +251,7 @@ export interface Mark5API {
     claudePath?: string
     codexPath?: string
   }) => Promise<CliStatusItem[]>
+  listEngineModels?: (engine: AgentEngine, cliPath?: string) => Promise<ModelOption[]>
 
   // Subscriptions from main -> renderer
   onAgentEvent(cb: (ev: AgentStreamEvent) => void): () => void

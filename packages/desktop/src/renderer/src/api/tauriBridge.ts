@@ -8,6 +8,7 @@ import type {
   FileEntry,
   HistorySnapshot,
   Mark5API,
+  ModelOption,
   SessionRecord,
   WorkspaceInfo
 } from '@shared/types'
@@ -77,6 +78,11 @@ export function installTauriMark5Bridge(): void {
         agyPath: paths?.agyPath || null,
         claudePath: paths?.claudePath || null,
         codexPath: paths?.codexPath || null
+      }),
+    listEngineModels: (engine, cliPath) =>
+      invoke<ModelOption[]>('list_engine_models', {
+        engine,
+        cliPath: cliPath || null
       }),
 
     onAgentEvent: (cb) => {
