@@ -1,0 +1,97 @@
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import type {
+  AgentDocOp,
+  AgentStreamEvent,
+  CommentThread,
+  FileEntry,
+  HistorySnapshot,
+  Mark5API,
+  SessionRecord,
+  WorkspaceInfo
+} from '@shared/types'
+
+export function installTauriMark5Bridge(): void {
+  if (typeof window === 'undefined' || window.mark5) return
+
+  const api: Mark5API = {
+    getDefaultWorkspace: () => invoke<WorkspaceInfo>('get_default_workspace'),
+    pickWorkspaceFolder: () => invoke<WorkspaceInfo | null>('pick_workspace_folder'),
+    listWorkspaceFiles: (rootPath) => invoke<FileEntry[]>('list_workspace_files', { rootPath }),
+    listWorkspaceAllFiles: (rootPath) =>
+      invoke<FileEntry[]>('list_workspace_all_files', { rootPath }),
+    readMarkdownFile: (rootPath, relPath) =>
+      invoke<string>('read_markdown_file', { rootPath, relPath }),
+    writeMarkdownFile: (rootPath, relPath, content) =>
+      invoke<void>('write_markdown_file', { rootPath, relPath, content }),
+
+    listSessions: (rootPath) => invoke<SessionRecord[]>('list_sessions', { rootPath }),
+    createSession: (payload) => invoke<SessionRecord>('create_session', { payload }),
+    saveSession: (rootPath, session) => invoke<void>('save_session', { rootPath, session }),
+    deleteSession: (rootPath, sessionId) =>
+      invoke<void>('delete_session', { rootPath, sessionId }),
+
+    listThreads: (rootPath, docRelPath) =>
+      invoke<CommentThread[]>('list_threads', { rootPath, docRelPath }),
+    saveThreads: (rootPath, docRelPath, threads) =>
+      invoke<void>('save_threads', { rootPath, docRelPath, threads }),
+
+    listHistory: (rootPath, docRelPath) =>
+      invoke<HistorySnapshot[]>('list_history', { rootPath, docRelPath }),
+    saveHistorySnapshot: (rootPath, payload) =>
+      invoke<HistorySnapshot>('save_history_snapshot', { rootPath, payload }),
+
+    sendAgentTurn: (payload) => invoke<void>('send_agent_turn', { payload }),
+    abortAgentTurn: (sessionId) => invoke<void>('abort_agent_turn', { sessionId }),
+
+    syncLiveDocument: (payload) => {
+      void invoke<void>('sync_live_document', {
+        rootPath: payload.rootPath,
+        docRelPath: payload.docRelPath,
+        markdown: payload.markdown
+      })
+    },
+
+    exportDocument: async (payload) => {
+      if (payload.format === 'pdf') {
+        window.print()
+        return { ok: true, outPath: '系统打印 / 另存为 PDF' }
+      }
+      return invoke<{ ok: boolean; outPath?: string }>('export_document', { payload })
+    },
+
+    openNewWindow: () => invoke<void>('open_new_window'),
+
+    onAgentEvent: (cb) => {
+      let unlisten: (() => void) | null = null
+      let disposed = false
+      void listen<AgentStreamEvent>('mc:agent-event', (ev) => {
+        if (!disposed) cb(ev.payload)
+      }).then((fn) => {
+        if (disposed) fn()
+        else unlisten = fn
+      })
+      return () => {
+        disposed = true
+        unlisten?.()
+      }
+    },
+
+    onAgentDocOp: (cb) => {
+      let unlisten: (() => void) | null = null
+      let disposed = false
+      void listen<AgentDocOp>('mc:agent-doc-op', (ev) => {
+        if (!disposed) cb(ev.payload)
+      }).then((fn) => {
+        if (disposed) fn()
+        else unlisten = fn
+      })
+      return () => {
+        disposed = true
+        unlisten?.()
+      }
+    }
+  }
+
+  window.mark5 = api
+}
