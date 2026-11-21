@@ -85,15 +85,15 @@
       @touchstart.passive="onUserScroll"
     >
       <div ref="hostWrapEl" class="muya-host">
-        <!-- Persistent Left-Gutter Change Bars (VS Code Git-diff style, quiet certainty) -->
+        <!-- Persistent Left-Gutter Change Bars (VS Code Git-diff style, click to review diff) -->
         <div
           v-for="bar in changedBarRects"
-          :key="'chg-' + bar.blockIndex"
+          :key="'chg-' + bar.changeId"
           class="changed-gutter-bar"
-          :class="{ focused: reviewFocusIndex === bar.blockIndex }"
+          :class="{ focused: activeDiffChange?.id === bar.changeId || reviewFocusIndex === bar.blockIndex }"
           :style="{ top: bar.top + 'px', left: bar.left + 'px', height: bar.height + 'px' }"
-          :title="`本轮已修改（第 ${bar.blockIndex + 1} 段）`"
-          @click.stop="focusChangedBlock(bar.blockIndex)"
+          :title="`点击审阅第 ${bar.blockIndex + 1} 段修改 Diff`"
+          @click.stop="openDiffForChange(bar.changeId)"
         />
 
         <!-- Brief Focus Highlight when stepping through changes via Review Bar -->
@@ -107,6 +107,55 @@
             height: reviewFocusBox.height + 'px'
           }"
         />
+
+        <!-- Form A: Floating Per-Paragraph Diff Review Card (Word-level Diff + Accept / Reject) -->
+        <div
+          v-if="activeDiffChange && !animState.running"
+          class="diff-review-card"
+          :style="{
+            top: diffCardPos.top + 'px',
+            left: diffCardPos.left + 'px',
+            width: diffCardPos.width + 'px'
+          }"
+          @click.stop
+        >
+          <div class="drc-head">
+            <div class="drc-title-wrap">
+              <span class="drc-kind" :class="activeDiffChange.type">
+                {{ diffKindLabel(activeDiffChange.type) }}
+              </span>
+              <span class="drc-title">第 {{ activeDiffChange.blockIndex + 1 }} 段改动对比</span>
+            </div>
+            <div class="drc-actions">
+              <button
+                class="drc-btn reject"
+                title="拒绝并退回此段原文"
+                @click="rejectChange(activeDiffChange.id)"
+              >
+                <RotateCcw :size="12" :stroke-width="2" />
+                <span>拒绝退回</span>
+              </button>
+              <button
+                class="drc-btn accept"
+                title="接受此段修改"
+                @click="acceptChange(activeDiffChange.id)"
+              >
+                <Check :size="12" :stroke-width="2.2" />
+                <span>接受</span>
+              </button>
+              <button class="drc-close" title="收起 Diff 卡片" @click="activeDiffId = null">
+                <X :size="13" :stroke-width="2" />
+              </button>
+            </div>
+          </div>
+          <div class="drc-body">
+            <template v-for="(seg, si) in activeDiffSegments" :key="si">
+              <del v-if="seg.kind === 'del'" class="diff-del">{{ seg.text }}</del>
+              <ins v-else-if="seg.kind === 'add'" class="diff-add">{{ seg.text }}</ins>
+              <span v-else class="diff-same">{{ seg.text }}</span>
+            </template>
+          </div>
+        </div>
 
         <!-- Agent Active Edit Overlay (Restrained Typora/Zed style + Real Typing Feel) -->
         <div
@@ -422,26 +471,42 @@
       </div>
     </div>
 
-    <!-- Human-Centered Change Review Navigator (Shows exact modified count + step-through) -->
+    <!-- Human-Centered Per-Turn Change Review Navigator (Step-through + Diff + Accept/Reject All) -->
     <div
-      v-if="changedBlocks.length > 0 && !animState.running && isMarkdownFile"
+      v-if="pendingChanges.length > 0 && !animState.running && isMarkdownFile"
       class="change-review-bar"
       @click.stop
     >
       <span class="crb-dot" />
-      <span class="crb-label">本轮修改 {{ changedBlocks.length }} 处</span>
+      <span class="crb-label">本轮修改 {{ pendingChanges.length }} 处</span>
       <div class="crb-nav">
         <button class="crb-icon-btn" title="上一处修改" @click="stepChangedBlock(-1)">
           <ChevronLeft :size="14" :stroke-width="2" />
         </button>
-        <span class="crb-counter">{{ reviewPos + 1 }}/{{ changedBlocks.length }}</span>
+        <span class="crb-counter">{{ reviewPos + 1 }}/{{ pendingChanges.length }}</span>
         <button class="crb-icon-btn" title="下一处修改" @click="stepChangedBlock(1)">
           <ChevronRight :size="14" :stroke-width="2" />
         </button>
       </div>
-      <button class="crb-done-btn" title="标记为已审阅" @click="clearChangedReview">
+      <button
+        class="crb-diff-btn"
+        :class="{ active: Boolean(activeDiffId) }"
+        title="展开或收起当前段落 Diff 对比"
+        @click="toggleDiffReview"
+      >
+        {{ activeDiffId ? '收起 Diff' : '审阅 Diff' }}
+      </button>
+      <button
+        class="crb-reject-btn"
+        title="全部退回本轮修改"
+        @click="rejectAllChanges"
+      >
+        <RotateCcw :size="12" :stroke-width="2" />
+        <span>全部退回</span>
+      </button>
+      <button class="crb-done-btn" title="全部接受本轮修改" @click="acceptAllChanges">
         <Check :size="13" :stroke-width="2.1" />
-        <span>完成审阅</span>
+        <span>全部接受</span>
       </button>
     </div>
   </main>
@@ -466,6 +531,7 @@ import {
   PanelLeftOpen,
   Quote,
   RemoveFormatting,
+  RotateCcw,
   Strikethrough,
   Underline,
   X
@@ -718,10 +784,21 @@ const animState = reactive({
   cursorY: 0
 })
 
-// Persistent human-certainty change tracking (VS Code Git-gutter style + step-through review)
-const changedBlocks = ref<number[]>([])
+// Persistent human-certainty per-turn Diff review (Form A: gutter bars + floating word-level Diff + Accept/Reject)
+interface PendingBlockChange {
+  id: string
+  blockIndex: number
+  type: 'replace_block' | 'insert_block' | 'delete_block'
+  oldMarkdown: string
+  newMarkdown: string
+  label: string
+}
+
+const pendingChanges = ref<PendingBlockChange[]>([])
 const reviewPos = ref(0)
 const reviewFocusIndex = ref(-1)
+const activeDiffId = ref<string | null>(null)
+const diffCardPos = reactive({ top: 0, left: 0, width: 640 })
 const reviewFocusBox = reactive({
   visible: false,
   top: 0,
@@ -731,19 +808,102 @@ const reviewFocusBox = reactive({
 })
 let reviewFocusTimer: ReturnType<typeof setTimeout> | null = null
 
+const activeDiffChange = computed(
+  () => pendingChanges.value.find((c) => c.id === activeDiffId.value) ?? null
+)
+
+function diffKindLabel(type: PendingBlockChange['type']): string {
+  if (type === 'insert_block') return '新增'
+  if (type === 'delete_block') return '删除'
+  return '修改'
+}
+
+function tokenizeForDiff(text: string): string[] {
+  const clean = text.replace(/^#{1,6}\s+/gm, '').trim()
+  return clean.match(/[\u4e00-\u9fff]|[A-Za-z0-9_]+|\s+|[^\s\u4e00-\u9fffA-Za-z0-9_]+/g) || []
+}
+
+function computeInlineDiff(
+  oldText: string,
+  newText: string
+): Array<{ kind: 'same' | 'del' | 'add'; text: string }> {
+  const a = tokenizeForDiff(oldText)
+  const b = tokenizeForDiff(newText)
+  if (a.length === 0) return [{ kind: 'add', text: b.join('') }]
+  if (b.length === 0) return [{ kind: 'del', text: a.join('') }]
+
+  // Guard against extreme token counts for < 2ms responsiveness
+  if (a.length * b.length > 160000) {
+    return [
+      { kind: 'del', text: a.join('') },
+      { kind: 'add', text: b.join('') }
+    ]
+  }
+
+  const m = a.length
+  const n = b.length
+  const dp: Uint16Array[] = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1))
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      if (a[i] === b[j]) {
+        dp[i][j] = dp[i + 1][j + 1] + 1
+      } else {
+        dp[i][j] = dp[i + 1][j] >= dp[i][j + 1] ? dp[i + 1][j] : dp[i][j + 1]
+      }
+    }
+  }
+
+  const raw: Array<{ kind: 'same' | 'del' | 'add'; text: string }> = []
+  let i = 0
+  let j = 0
+  while (i < m && j < n) {
+    if (a[i] === b[j]) {
+      raw.push({ kind: 'same', text: a[i] })
+      i++
+      j++
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      raw.push({ kind: 'del', text: a[i] })
+      i++
+    } else {
+      raw.push({ kind: 'add', text: b[j] })
+      j++
+    }
+  }
+  while (i < m) raw.push({ kind: 'del', text: a[i++] })
+  while (j < n) raw.push({ kind: 'add', text: b[j++] })
+
+  const merged: Array<{ kind: 'same' | 'del' | 'add'; text: string }> = []
+  for (const seg of raw) {
+    const prev = merged[merged.length - 1]
+    if (prev && prev.kind === seg.kind) {
+      prev.text += seg.text
+    } else {
+      merged.push({ ...seg })
+    }
+  }
+  return merged
+}
+
+const activeDiffSegments = computed(() => {
+  const ch = activeDiffChange.value
+  if (!ch) return []
+  return computeInlineDiff(ch.oldMarkdown, ch.newMarkdown)
+})
+
 const changedBarRects = computed(() => {
   void marginTick.value
   const wrap = hostWrapEl.value
   const els = getTopBlockElements()
-  if (!wrap || els.length === 0 || changedBlocks.value.length === 0) return []
+  if (!wrap || els.length === 0 || pendingChanges.value.length === 0) return []
   const wRect = wrap.getBoundingClientRect()
-  const out: Array<{ blockIndex: number; top: number; left: number; height: number }> = []
-  for (const idx of changedBlocks.value) {
-    const el = els[idx]
+  const out: Array<{ changeId: string; blockIndex: number; top: number; left: number; height: number }> = []
+  for (const ch of pendingChanges.value) {
+    const el = els[Math.min(Math.max(0, ch.blockIndex), els.length - 1)]
     if (!el) continue
     const tRect = el.getBoundingClientRect()
     out.push({
-      blockIndex: idx,
+      changeId: ch.id,
+      blockIndex: ch.blockIndex,
       top: Math.max(0, tRect.top - wRect.top + 2),
       left: Math.max(0, tRect.left - wRect.left - 12),
       height: Math.max(18, tRect.height - 4)
@@ -752,21 +912,87 @@ const changedBarRects = computed(() => {
   return out
 })
 
-function recordChangedBlock(idx: number) {
-  if (idx < 0) return
-  if (!changedBlocks.value.includes(idx)) {
-    changedBlocks.value = [...changedBlocks.value, idx].sort((a, b) => a - b)
+function recordPendingChange(
+  type: PendingBlockChange['type'],
+  blockIndex: number,
+  oldMarkdown: string,
+  newMarkdown: string,
+  label: string
+) {
+  if (blockIndex < 0) return
+  if (type === 'insert_block') {
+    for (const c of pendingChanges.value) {
+      if (c.blockIndex >= blockIndex) c.blockIndex += 1
+    }
+  } else if (type === 'delete_block') {
+    for (const c of pendingChanges.value) {
+      if (c.blockIndex > blockIndex) c.blockIndex -= 1
+    }
+  }
+
+  const existing =
+    type === 'replace_block'
+      ? pendingChanges.value.find((c) => c.blockIndex === blockIndex && c.type !== 'delete_block')
+      : undefined
+  if (existing) {
+    // Preserve true pre-turn oldMarkdown if same block edited twice in one turn
+    existing.newMarkdown = newMarkdown
+    existing.label = label
+  } else {
+    pendingChanges.value = [
+      ...pendingChanges.value,
+      {
+        id: `chg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        blockIndex,
+        type,
+        oldMarkdown,
+        newMarkdown,
+        label
+      }
+    ].sort((a, b) => a.blockIndex - b.blockIndex)
   }
   marginTick.value += 1
+}
+
+function positionDiffCard(blockIndex: number) {
+  const wrap = hostWrapEl.value
+  const els = getTopBlockElements()
+  const target = els[Math.min(Math.max(0, blockIndex), Math.max(0, els.length - 1))]
+  if (!wrap || !target) return
+  const wRect = wrap.getBoundingClientRect()
+  const tRect = target.getBoundingClientRect()
+  const cardWidth = Math.min(Math.max(360, tRect.width + 20), wrap.clientWidth)
+  diffCardPos.left = Math.max(0, tRect.left - wRect.left - 10)
+  diffCardPos.width = cardWidth
+  // Anchor neatly below the focused paragraph so it never collides with headings above
+  diffCardPos.top = Math.max(8, tRect.bottom - wRect.top + 8)
+}
+
+function openDiffForChange(changeId: string) {
+  const idx = pendingChanges.value.findIndex((c) => c.id === changeId)
+  if (idx < 0) return
+  const ch = pendingChanges.value[idx]
+  reviewPos.value = idx
+  activeDiffId.value = ch.id
+  focusChangedBlock(ch.blockIndex)
+  nextTick(() => positionDiffCard(ch.blockIndex))
+}
+
+function toggleDiffReview() {
+  if (activeDiffId.value) {
+    activeDiffId.value = null
+    return
+  }
+  if (pendingChanges.value.length === 0) return
+  const safePos = Math.min(reviewPos.value, pendingChanges.value.length - 1)
+  openDiffForChange(pendingChanges.value[safePos].id)
 }
 
 function focusChangedBlock(blockIndex: number) {
   const wrap = hostWrapEl.value
   const els = getTopBlockElements()
-  const target = els[blockIndex]
+  const target = els[Math.min(Math.max(0, blockIndex), Math.max(0, els.length - 1))]
   if (!wrap || !target) return
-  const posIdx = changedBlocks.value.indexOf(blockIndex)
-  if (posIdx >= 0) reviewPos.value = posIdx
   reviewFocusIndex.value = blockIndex
   userScrollPausedUntil = 0
   scrollBlockToGoldenZone(target)
@@ -781,19 +1007,121 @@ function focusChangedBlock(blockIndex: number) {
   reviewFocusTimer = setTimeout(() => {
     reviewFocusBox.visible = false
     reviewFocusIndex.value = -1
-  }, 1400)
+  }, 1500)
 }
 
 function stepChangedBlock(delta: number) {
-  const len = changedBlocks.value.length
+  const len = pendingChanges.value.length
   if (len === 0) return
   reviewPos.value = (reviewPos.value + delta + len) % len
-  focusChangedBlock(changedBlocks.value[reviewPos.value])
+  openDiffForChange(pendingChanges.value[reviewPos.value].id)
+}
+
+function acceptChange(changeId: string) {
+  const idx = pendingChanges.value.findIndex((c) => c.id === changeId)
+  if (idx < 0) return
+  pendingChanges.value = pendingChanges.value.filter((c) => c.id !== changeId)
+  if (pendingChanges.value.length === 0) {
+    clearChangedReview()
+    store.showToast('本轮修改已全部接受')
+    return
+  }
+  const nextIdx = Math.min(idx, pendingChanges.value.length - 1)
+  reviewPos.value = nextIdx
+  if (activeDiffId.value === changeId) {
+    openDiffForChange(pendingChanges.value[nextIdx].id)
+  }
+  marginTick.value += 1
+}
+
+async function rejectChange(changeId: string) {
+  const idx = pendingChanges.value.findIndex((c) => c.id === changeId)
+  if (idx < 0) return
+  const ch = pendingChanges.value[idx]
+  const currentMd = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
+  const blocks = splitTopBlocks(currentMd)
+
+  if (ch.type === 'replace_block') {
+    if (ch.blockIndex >= 0 && ch.blockIndex < blocks.length) {
+      blocks[ch.blockIndex] = ch.oldMarkdown
+    }
+  } else if (ch.type === 'insert_block') {
+    if (ch.blockIndex >= 0 && ch.blockIndex < blocks.length) {
+      blocks.splice(ch.blockIndex, 1)
+    }
+    for (const other of pendingChanges.value) {
+      if (other.id !== ch.id && other.blockIndex > ch.blockIndex) {
+        other.blockIndex -= 1
+      }
+    }
+  } else if (ch.type === 'delete_block') {
+    const insertAt = Math.min(blocks.length, Math.max(0, ch.blockIndex))
+    blocks.splice(insertAt, 0, ch.oldMarkdown)
+    for (const other of pendingChanges.value) {
+      if (other.id !== ch.id && other.blockIndex >= insertAt) {
+        other.blockIndex += 1
+      }
+    }
+  }
+
+  const nextMd = blocks.join('\n\n') + '\n'
+  store.markdown = nextMd
+  setMuyaMarkdownQuietly(nextMd)
+  await store.onEditorMarkdownChanged(nextMd, true)
+
+  pendingChanges.value = pendingChanges.value.filter((c) => c.id !== changeId)
+  store.showToast(`已退回第 ${ch.blockIndex + 1} 段原文`)
+  await nextTick()
+  marginTick.value += 1
+
+  if (pendingChanges.value.length === 0) {
+    clearChangedReview()
+    return
+  }
+  const nextIdx = Math.min(idx, pendingChanges.value.length - 1)
+  reviewPos.value = nextIdx
+  if (activeDiffId.value === changeId) {
+    openDiffForChange(pendingChanges.value[nextIdx].id)
+  }
+}
+
+function acceptAllChanges() {
+  clearChangedReview()
+  store.showToast('已全部接受本轮修改')
+}
+
+async function rejectAllChanges() {
+  if (pendingChanges.value.length === 0) return
+  const currentMd = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
+  const blocks = splitTopBlocks(currentMd)
+  // Revert from bottom to top so block indices stay accurate
+  const sortedDesc = [...pendingChanges.value].sort((a, b) => b.blockIndex - a.blockIndex)
+  for (const ch of sortedDesc) {
+    if (ch.type === 'replace_block') {
+      if (ch.blockIndex >= 0 && ch.blockIndex < blocks.length) {
+        blocks[ch.blockIndex] = ch.oldMarkdown
+      }
+    } else if (ch.type === 'insert_block') {
+      if (ch.blockIndex >= 0 && ch.blockIndex < blocks.length) {
+        blocks.splice(ch.blockIndex, 1)
+      }
+    } else if (ch.type === 'delete_block') {
+      const insertAt = Math.min(blocks.length, Math.max(0, ch.blockIndex))
+      blocks.splice(insertAt, 0, ch.oldMarkdown)
+    }
+  }
+  const nextMd = blocks.join('\n\n') + '\n'
+  store.markdown = nextMd
+  setMuyaMarkdownQuietly(nextMd)
+  await store.onEditorMarkdownChanged(nextMd, true)
+  clearChangedReview()
+  store.showToast('已全部退回本轮修改')
 }
 
 function clearChangedReview() {
-  changedBlocks.value = []
+  pendingChanges.value = []
   reviewPos.value = 0
+  activeDiffId.value = null
   reviewFocusIndex.value = -1
   reviewFocusBox.visible = false
 }
@@ -802,6 +1130,15 @@ watch(
   () => store.activeDocRelPath,
   () => {
     clearChangedReview()
+  }
+)
+
+watch(
+  () => store.agentBusy,
+  (busy, prev) => {
+    if (busy && !prev) {
+      clearChangedReview()
+    }
   }
 )
 
@@ -1133,6 +1470,11 @@ async function drainOpQueue() {
         ? Math.min(blocks.length, Math.max(0, op.afterBlockIndex + 1))
         : Math.min(Math.max(0, op.blockIndex), Math.max(0, blocks.length - 1))
 
+    const prevBlockMarkdown =
+      op.type === 'insert_block' ? '' : (blocks[targetIdx] ?? '')
+    const nextBlockMarkdown =
+      op.type === 'delete_block' ? '' : (op.newMarkdown ?? '')
+
     if (!animState.skipAll) {
       animState.activeBlockIndex = targetIdx
       animState.phase = 'lock'
@@ -1224,9 +1566,7 @@ async function drainOpQueue() {
     }
 
     await nextTick()
-    if (op.type !== 'delete_block') {
-      recordChangedBlock(targetIdx)
-    }
+    recordPendingChange(op.type, targetIdx, prevBlockMarkdown, nextBlockMarkdown, op.label)
 
     if (!animState.skipAll) {
       animState.phase = 'settled'
