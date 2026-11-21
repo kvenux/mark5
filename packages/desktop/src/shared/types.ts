@@ -181,7 +181,7 @@ export interface AgentStreamEvent {
 
 export interface Mark5API {
   // Workspace & files
-  getDefaultWorkspace(): Promise<WorkspaceInfo>
+  getDefaultWorkspace(): Promise<WorkspaceInfo | null>
   pickWorkspaceFolder(): Promise<WorkspaceInfo | null>
   listWorkspaceFiles(rootPath: string): Promise<FileEntry[]>
   listWorkspaceAllFiles(rootPath: string): Promise<FileEntry[]>

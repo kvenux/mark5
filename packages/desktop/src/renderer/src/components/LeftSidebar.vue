@@ -2,7 +2,7 @@
   <aside class="left-sidebar">
     <!-- Brand Header -->
     <div class="sidebar-top">
-      <span class="brand-word">Mark 5</span>
+      <button class="brand-word" title="返回项目欢迎页" @click="store.closeWorkspace()">Mark 5</button>
       <div class="sidebar-top-actions">
         <button class="icon-btn" title="新建窗口 (Ctrl+Shift+N)" @click="openNewWindow">
           <SquarePlus :size="15" :stroke-width="1.75" />
@@ -741,6 +741,9 @@ onUnmounted(() => {
   font-weight: 650;
   letter-spacing: -0.02em;
   color: var(--ink-primary);
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: 6px;
 }
 .icon-btn {
   width: 28px;

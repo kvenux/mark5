@@ -72,44 +72,20 @@ async fn save_last_workspace(root_path: &str) {
 }
 
 #[tauri::command]
-async fn get_default_workspace() -> Result<WorkspaceInfo, String> {
+async fn get_default_workspace() -> Result<Option<WorkspaceInfo>, String> {
     if let Ok(env_ws) = std::env::var("MARK5_WORKSPACE") {
         let trimmed = env_ws.trim();
         if !trimmed.is_empty() {
-            return Ok(make_workspace_info(trimmed));
+            return Ok(Some(make_workspace_info(trimmed)));
         }
     }
 
     if let Some(last) = read_last_workspace().await {
-        return Ok(make_workspace_info(&last));
+        return Ok(Some(make_workspace_info(&last)));
     }
 
-    let mut root = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| ".".to_string());
-
-    let lower = root.replace('\\', "/").to_lowercase();
-    if lower.ends_with("/packages/desktop") || lower.ends_with("/packages/desktop/src-tauri") {
-        if let Some(p) = Path::new(&root).parent().and_then(|p| p.parent()) {
-            let p = if lower.ends_with("/src-tauri") {
-                p.parent().unwrap_or(p)
-            } else {
-                p
-            };
-            root = p.to_string_lossy().to_string();
-        }
-    } else if lower.ends_with("/target/release") || lower.ends_with("/target/debug") {
-        if let Some(home) = user_home_dir() {
-            let docs = home.join("Documents");
-            root = if docs.is_dir() {
-                docs.to_string_lossy().to_string()
-            } else {
-                home.to_string_lossy().to_string()
-            };
-        }
-    }
-
-    Ok(make_workspace_info(&root))
+    // First launch (no saved workspace yet): let frontend show the clean Welcome Launcher
+    Ok(None)
 }
 
 #[tauri::command]

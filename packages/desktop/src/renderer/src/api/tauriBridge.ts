@@ -17,7 +17,7 @@ export function installTauriMark5Bridge(): void {
   if (typeof window === 'undefined' || window.mark5) return
 
   const api: Mark5API = {
-    getDefaultWorkspace: () => invoke<WorkspaceInfo>('get_default_workspace'),
+    getDefaultWorkspace: () => invoke<WorkspaceInfo | null>('get_default_workspace'),
     pickWorkspaceFolder: () => invoke<WorkspaceInfo | null>('pick_workspace_folder'),
     listWorkspaceFiles: (rootPath) => invoke<FileEntry[]>('list_workspace_files', { rootPath }),
     listWorkspaceAllFiles: (rootPath) =>

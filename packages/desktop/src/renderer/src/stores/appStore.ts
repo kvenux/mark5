@@ -194,27 +194,42 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function init() {
-    const defaultWs = await window.mark5.getDefaultWorkspace()
-    const recent = loadRecentWorkspaces()
-    let initialWs = defaultWs
+  function removeRecentWorkspace(rootPath: string) {
+    workspaces.value = workspaces.value.filter((w) => w.rootPath !== rootPath)
     try {
-      const savedRaw = localStorage.getItem('mark5_last_workspace')
-      if (savedRaw) {
-        const saved = JSON.parse(savedRaw) as WorkspaceInfo
-        if (saved?.rootPath && defaultWs.rootPath.replace(/\\/g, '/').toLowerCase().endsWith('/target/release')) {
-          initialWs = saved
-        }
-      }
+      localStorage.setItem('mark5_recent_workspaces', JSON.stringify(workspaces.value))
     } catch {
       // ignore
     }
-    const merged = [initialWs, ...recent.filter((w) => w.rootPath !== initialWs.rootPath)].slice(0, 12)
-    workspaces.value = merged
-    await switchWorkspace(initialWs)
+  }
+
+  function closeWorkspace() {
+    clearEditorState()
+    activeWorkspace.value = null
+    files.value = []
+    allFiles.value = []
+    sessions.value = []
+    activeSessionId.value = null
+  }
+
+  async function init() {
+    const defaultWs = await window.mark5.getDefaultWorkspace()
+    const recent = loadRecentWorkspaces()
 
     window.mark5.onAgentEvent(handleAgentEvent)
     window.mark5.onAgentDocOp(handleAgentDocOp)
+
+    if (defaultWs) {
+      const merged = [defaultWs, ...recent.filter((w) => w.rootPath !== defaultWs.rootPath)].slice(
+        0,
+        12
+      )
+      workspaces.value = merged
+      await switchWorkspace(defaultWs)
+    } else {
+      workspaces.value = recent
+      activeWorkspace.value = null
+    }
   }
 
   async function pickWorkspace() {
@@ -1060,6 +1075,8 @@ export const useAppStore = defineStore('app', () => {
     init,
     pickWorkspace,
     switchWorkspace,
+    removeRecentWorkspace,
+    closeWorkspace,
     refreshFiles,
     createSession,
     selectSession,

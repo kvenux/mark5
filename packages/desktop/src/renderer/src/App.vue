@@ -1,44 +1,52 @@
 <template>
   <div class="app-root">
-    <!-- Left Sidebar (Docs Directory/TOC in 'docs' mode, Session Manager in 'collab' mode) -->
-    <LeftSidebar
-      v-if="showSidebar"
-      :mode="mode"
-      @update:mode="switchMode"
-      @collapse="showSidebar = false"
-      @new-session="handleNewSession"
+    <!-- Clean Welcome Launcher when no workspace is open yet -->
+    <WelcomeView
+      v-if="!store.activeWorkspace"
       @open-settings="openSettings('appearance')"
     />
 
-    <!-- Middle Chat Pane (only in 'collab' AI writing mode) -->
-    <ChatPane
-      v-if="mode === 'collab'"
-      :sidebar-visible="showSidebar"
-      :doc-visible="showDoc"
-      :pane-width="chatWidth"
-      @expand-sidebar="showSidebar = true"
-      @open-doc="showDoc = true"
-      @open-model-settings="openSettings('backend')"
-    />
+    <template v-else>
+      <!-- Left Sidebar (Docs Directory/TOC in 'docs' mode, Session Manager in 'collab' mode) -->
+      <LeftSidebar
+        v-if="showSidebar"
+        :mode="mode"
+        @update:mode="switchMode"
+        @collapse="showSidebar = false"
+        @new-session="handleNewSession"
+        @open-settings="openSettings('appearance')"
+      />
 
-    <!-- Draggable Resizer between ChatPane and MuyaEditorPane (P1-6) -->
-    <div
-      v-if="mode === 'collab' && showDoc"
-      class="pane-resizer"
-      :class="{ dragging: isDragging }"
-      title="拖动调节对话栏宽度"
-      @mousedown="startResize"
-    />
+      <!-- Middle Chat Pane (only in 'collab' AI writing mode) -->
+      <ChatPane
+        v-if="mode === 'collab'"
+        :sidebar-visible="showSidebar"
+        :doc-visible="showDoc"
+        :pane-width="chatWidth"
+        @expand-sidebar="showSidebar = true"
+        @open-doc="showDoc = true"
+        @open-model-settings="openSettings('backend')"
+      />
 
-    <!-- Right Muya WYSIWYG Document Pane (always visible in 'files'/'docs' mode, toggleable in 'collab' mode) -->
-    <MuyaEditorPane
-      v-show="mode !== 'collab' || showDoc"
-      :sidebar-visible="showSidebar"
-      :can-close="mode === 'collab'"
-      @expand-sidebar="showSidebar = true"
-      @close-doc="showDoc = false"
-      @open-history="showHistory = true"
-    />
+      <!-- Draggable Resizer between ChatPane and MuyaEditorPane (P1-6) -->
+      <div
+        v-if="mode === 'collab' && showDoc"
+        class="pane-resizer"
+        :class="{ dragging: isDragging }"
+        title="拖动调节对话栏宽度"
+        @mousedown="startResize"
+      />
+
+      <!-- Right Muya WYSIWYG Document Pane (always visible in 'files'/'docs' mode, toggleable in 'collab' mode) -->
+      <MuyaEditorPane
+        v-show="mode !== 'collab' || showDoc"
+        :sidebar-visible="showSidebar"
+        :can-close="mode === 'collab'"
+        @expand-sidebar="showSidebar = true"
+        @close-doc="showDoc = false"
+        @open-history="showHistory = true"
+      />
+    </template>
 
     <!-- Minimal History Modal -->
     <div v-if="showHistory" class="modal-mask" @click.self="showHistory = false">
@@ -82,6 +90,7 @@ import LeftSidebar from '@/components/LeftSidebar.vue'
 import ChatPane from '@/components/ChatPane.vue'
 import MuyaEditorPane from '@/components/MuyaEditorPane.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
+import WelcomeView from '@/components/WelcomeView.vue'
 
 const store = useAppStore()
 const mode = ref<'files' | 'docs' | 'collab'>('docs')
