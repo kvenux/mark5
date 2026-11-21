@@ -40,21 +40,56 @@ fn make_workspace_info(root_path: &str) -> WorkspaceInfo {
     }
 }
 
+fn app_state_file() -> Option<std::path::PathBuf> {
+    user_home_dir().map(|h| h.join(".mark5").join("app-state.json"))
+}
+
+async fn read_last_workspace() -> Option<String> {
+    let path = app_state_file()?;
+    let raw = tokio::fs::read_to_string(&path).await.ok()?;
+    let val: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let last = val.get("lastWorkspace").and_then(|v| v.as_str())?.trim();
+    if !last.is_empty() && Path::new(last).is_dir() {
+        Some(last.to_string())
+    } else {
+        None
+    }
+}
+
+async fn save_last_workspace(root_path: &str) {
+    let Some(path) = app_state_file() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    let payload = serde_json::json!({
+        "lastWorkspace": root_path
+    });
+    if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
+        let _ = tokio::fs::write(&path, bytes).await;
+    }
+}
+
 #[tauri::command]
 async fn get_default_workspace() -> Result<WorkspaceInfo, String> {
-    let mut root = std::env::var("MARK5_WORKSPACE")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string())
-        });
+    if let Ok(env_ws) = std::env::var("MARK5_WORKSPACE") {
+        let trimmed = env_ws.trim();
+        if !trimmed.is_empty() {
+            return Ok(make_workspace_info(trimmed));
+        }
+    }
+
+    if let Some(last) = read_last_workspace().await {
+        return Ok(make_workspace_info(&last));
+    }
+
+    let mut root = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| ".".to_string());
 
     let lower = root.replace('\\', "/").to_lowercase();
-    if std::env::var("MARK5_WORKSPACE").is_err()
-        && (lower.ends_with("/packages/desktop") || lower.ends_with("/packages/desktop/src-tauri"))
-    {
+    if lower.ends_with("/packages/desktop") || lower.ends_with("/packages/desktop/src-tauri") {
         if let Some(p) = Path::new(&root).parent().and_then(|p| p.parent()) {
             let p = if lower.ends_with("/src-tauri") {
                 p.parent().unwrap_or(p)
@@ -62,6 +97,15 @@ async fn get_default_workspace() -> Result<WorkspaceInfo, String> {
                 p
             };
             root = p.to_string_lossy().to_string();
+        }
+    } else if lower.ends_with("/target/release") || lower.ends_with("/target/debug") {
+        if let Some(home) = user_home_dir() {
+            let docs = home.join("Documents");
+            root = if docs.is_dir() {
+                docs.to_string_lossy().to_string()
+            } else {
+                home.to_string_lossy().to_string()
+            };
         }
     }
 
@@ -81,6 +125,7 @@ async fn pick_workspace_folder(app: AppHandle) -> Result<Option<WorkspaceInfo>, 
 
     if let Some(fp) = picked {
         let root = fp.to_string();
+        save_last_workspace(&root).await;
         Ok(Some(make_workspace_info(&root)))
     } else {
         Ok(None)

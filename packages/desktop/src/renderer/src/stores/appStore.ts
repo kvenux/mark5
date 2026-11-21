@@ -171,10 +171,47 @@ export const useAppStore = defineStore('app', () => {
     }, 2600)
   }
 
+  function loadRecentWorkspaces(): WorkspaceInfo[] {
+    try {
+      const raw = localStorage.getItem('mark5_recent_workspaces')
+      if (!raw) return []
+      const arr = JSON.parse(raw)
+      if (!Array.isArray(arr)) return []
+      return arr.filter((w) => w && typeof w.rootPath === 'string' && w.rootPath.trim())
+    } catch {
+      return []
+    }
+  }
+
+  function persistWorkspaceHistory(ws: WorkspaceInfo) {
+    const existing = workspaces.value.filter((w) => w.rootPath !== ws.rootPath)
+    workspaces.value = [ws, ...existing].slice(0, 12)
+    try {
+      localStorage.setItem('mark5_recent_workspaces', JSON.stringify(workspaces.value))
+      localStorage.setItem('mark5_last_workspace', JSON.stringify(ws))
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+
   async function init() {
-    const ws = await window.mark5.getDefaultWorkspace()
-    workspaces.value = [ws]
-    await switchWorkspace(ws)
+    const defaultWs = await window.mark5.getDefaultWorkspace()
+    const recent = loadRecentWorkspaces()
+    let initialWs = defaultWs
+    try {
+      const savedRaw = localStorage.getItem('mark5_last_workspace')
+      if (savedRaw) {
+        const saved = JSON.parse(savedRaw) as WorkspaceInfo
+        if (saved?.rootPath && defaultWs.rootPath.replace(/\\/g, '/').toLowerCase().endsWith('/target/release')) {
+          initialWs = saved
+        }
+      }
+    } catch {
+      // ignore
+    }
+    const merged = [initialWs, ...recent.filter((w) => w.rootPath !== initialWs.rootPath)].slice(0, 12)
+    workspaces.value = merged
+    await switchWorkspace(initialWs)
 
     window.mark5.onAgentEvent(handleAgentEvent)
     window.mark5.onAgentDocOp(handleAgentDocOp)
@@ -183,9 +220,7 @@ export const useAppStore = defineStore('app', () => {
   async function pickWorkspace() {
     const ws = await window.mark5.pickWorkspaceFolder()
     if (!ws) return
-    if (!workspaces.value.some((w) => w.rootPath === ws.rootPath)) {
-      workspaces.value.push(ws)
-    }
+    persistWorkspaceHistory(ws)
     await switchWorkspace(ws)
   }
 
@@ -242,6 +277,7 @@ export const useAppStore = defineStore('app', () => {
   async function switchWorkspace(ws: WorkspaceInfo) {
     clearEditorState()
     activeWorkspace.value = ws
+    persistWorkspaceHistory(ws)
     const [mdTree, fullTree, sessList] = await Promise.all([
       window.mark5.listWorkspaceFiles(ws.rootPath),
       window.mark5.listWorkspaceAllFiles(ws.rootPath),
