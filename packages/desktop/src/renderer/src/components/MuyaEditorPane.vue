@@ -187,12 +187,18 @@
                     <span class="mtc-author">{{ m.who === 'user' ? '你' : activeEngineDisplayName }}</span>
                     <span class="mtc-time">{{ formatCommentTime(m.timestamp) }}</span>
                   </div>
-                  <div class="mtc-msg-body">
-                    <template v-for="(seg, si) in splitMentionSegments(m.text)" :key="si">
-                      <span v-if="seg.isMention" class="mtc-mention">{{ seg.text }}</span>
-                      <span v-else>{{ seg.text }}</span>
-                    </template>
-                  </div>
+                  <div
+                    class="mtc-msg-body comment-md"
+                    :class="{ collapsed: isLongComment(m.text) && !expandedCommentMsgs[m.id] }"
+                    v-html="renderCommentMd(m.text)"
+                  />
+                  <button
+                    v-if="isLongComment(m.text)"
+                    class="mtc-expand-btn"
+                    @click.stop="toggleCommentExpand(m.id)"
+                  >
+                    {{ expandedCommentMsgs[m.id] ? '收起' : '展开全文' }}
+                  </button>
                 </div>
               </div>
 
@@ -400,8 +406,8 @@
       <div class="float-quote">“{{ activeThread.quote }}”</div>
       <div class="thread-msgs">
         <div v-for="m in activeThread.messages" :key="m.id" class="thread-msg-row">
-          <span class="msg-who">{{ m.who === 'user' ? '你' : 'AGY' }}</span>
-          <div class="msg-body">{{ m.text }}</div>
+          <span class="msg-who">{{ m.who === 'user' ? '你' : activeEngineDisplayName }}</span>
+          <div class="msg-body comment-md" v-html="renderCommentMd(m.text)" />
         </div>
       </div>
       <div v-if="!activeThread.resolved" class="thread-reply-bar">
@@ -443,6 +449,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import MarkdownIt from 'markdown-it'
+import DOMPurify from 'dompurify'
 import {
   Bold,
   Check,
@@ -575,14 +583,18 @@ const marginThreadGroups = computed(() => {
       top = Math.max(12, el.getBoundingClientRect().top - wrap.getBoundingClientRect().top + 2)
     }
     const estHeight = showCommentRail.value
-      ? Math.max(
-          92,
-          28 +
-            thread.messages.reduce(
-              (acc, m) => acc + 30 + Math.ceil(m.text.length / 18) * 19,
-              0
-            ) +
-            (activeMarginThreadId.value === thread.id ? 78 : 0)
+      ? Math.min(
+          380,
+          Math.max(
+            92,
+            28 +
+              thread.messages.reduce((acc, m) => {
+                const clamped = isLongComment(m.text) && !expandedCommentMsgs[m.id]
+                const h = clamped ? 136 : Math.min(260, 30 + Math.ceil(m.text.length / 18) * 19)
+                return acc + h
+              }, 0) +
+              (activeMarginThreadId.value === thread.id ? 78 : 0)
+          )
         )
       : 32
     return { thread, top, estHeight }
@@ -606,14 +618,31 @@ function formatCommentTime(ts: number): string {
   return `${mon}月${day}日 ${hh}:${mm}`
 }
 
-function splitMentionSegments(text: string): Array<{ text: string; isMention: boolean }> {
-  const parts = text.split(/(@(?:Claude|AGY|Codex|AI)\b)/gi)
-  return parts
-    .filter((p) => p.length > 0)
-    .map((p) => ({
-      text: p,
-      isMention: /^@(?:Claude|AGY|Codex|AI)$/i.test(p)
-    }))
+const commentMd = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true
+})
+const expandedCommentMsgs = reactive<Record<string, boolean>>({})
+
+function isLongComment(text: string): boolean {
+  return text.length > 150 || text.split(/\r?\n/).length > 5
+}
+
+function toggleCommentExpand(msgId: string) {
+  expandedCommentMsgs[msgId] = !expandedCommentMsgs[msgId]
+  nextTick(() => {
+    marginTick.value += 1
+  })
+}
+
+function renderCommentMd(text: string): string {
+  const html = commentMd.render(text || '')
+  const withMentions = html.replace(
+    /(@(?:Claude|AGY|Codex|AI)\b)/gi,
+    '<span class="mtc-mention">$1</span>'
+  )
+  return DOMPurify.sanitize(withMentions)
 }
 
 function selectMarginThread(thread: CommentThread) {
@@ -1141,12 +1170,15 @@ async function drainOpQueue() {
           await sleep(28)
         }
       } else {
-        // Human-readable real typing cadence (~20 chars/sec, ~32 chars/sec with slight backlog)
-        const baseMsPerChar = remainingForDoc >= 1 ? 30 : 46
-        // Cap total duration at ~4.2s for very long paragraphs by emitting 2 chars/tick if needed
-        const maxDurationMs = remainingForDoc >= 1 ? 2400 : 4200
+        // Human-readable real typing cadence (~15 chars/sec default, ~24 chars/sec with slight backlog)
+        const baseMsPerChar = remainingForDoc >= 1 ? 42 : 62
+        // Cap total duration at ~4.8s for very long paragraphs by emitting 2 chars/tick if needed
+        const maxDurationMs = remainingForDoc >= 1 ? 2800 : 4800
         const charsPerTick = Math.max(1, Math.ceil((totalChars * baseMsPerChar) / maxDurationMs))
-        const tickDelay = Math.max(24, Math.min(baseMsPerChar, Math.round(maxDurationMs / Math.max(1, totalChars / charsPerTick))))
+        const tickDelay = Math.max(
+          26,
+          Math.min(baseMsPerChar, Math.round(maxDurationMs / Math.max(1, totalChars / charsPerTick)))
+        )
 
         for (let i = charsPerTick; i <= totalChars + charsPerTick - 1; i += charsPerTick) {
           if (animState.runId !== myRunId || animState.skip) break
@@ -1159,7 +1191,7 @@ async function drainOpQueue() {
             if (neededH > animState.boxHeight) animState.boxHeight = neededH
           }
           const lastChar = chars[count - 1] || ''
-          const extraPause = charsPerTick === 1 && PUNCT_PAUSE_RE.test(lastChar) ? 85 : 0
+          const extraPause = charsPerTick === 1 && PUNCT_PAUSE_RE.test(lastChar) ? 100 : 0
           await sleep(tickDelay + extraPause)
         }
       }
@@ -1536,9 +1568,12 @@ onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
   if (scrollEl.value) {
     scrollPaneWidth.value = scrollEl.value.clientWidth || 1000
-    scrollResizeObs = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        scrollPaneWidth.value = entry.contentRect.width
+    scrollResizeObs = new ResizeObserver(() => {
+      if (!scrollEl.value) return
+      // Use clientWidth (includes padding!) so toggling .with-comment-rail padding NEVER causes oscillation!
+      const nextW = scrollEl.value.clientWidth
+      if (Math.abs(nextW - scrollPaneWidth.value) >= 2) {
+        scrollPaneWidth.value = nextW
         marginTick.value += 1
       }
     })
@@ -1762,6 +1797,9 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 11px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 .mtc-msg {
   display: flex;
@@ -1805,13 +1843,56 @@ onUnmounted(() => {
   line-height: 1.55;
   color: var(--ink-body);
   word-break: break-word;
-  white-space: pre-wrap;
+  position: relative;
 }
-.mtc-mention {
+.mtc-msg-body.collapsed {
+  max-height: 116px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 66%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 66%, transparent 100%);
+}
+.mtc-expand-btn {
+  align-self: flex-start;
+  padding: 1px 6px;
+  margin-top: 2px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+}
+.mtc-expand-btn:hover {
+  background: var(--accent-soft);
+}
+.comment-md :deep(p) {
+  margin: 0 0 6px;
+}
+.comment-md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.comment-md :deep(ul),
+.comment-md :deep(ol) {
+  margin: 4px 0 6px;
+  padding-left: 16px;
+}
+.comment-md :deep(li) {
+  margin: 2px 0;
+}
+.comment-md :deep(strong) {
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+.comment-md :deep(code) {
+  font-family: Consolas, 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+}
+.comment-md :deep(.mtc-mention) {
   color: #2563eb;
   font-weight: 500;
 }
-[data-theme='dark'] .mtc-mention {
+[data-theme='dark'] .comment-md :deep(.mtc-mention) {
   color: #60a5fa;
 }
 .mtc-reply-box {
