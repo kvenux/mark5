@@ -9,6 +9,7 @@ import type {
   FileEntry,
   HistorySnapshot,
   ModelOption,
+  QuotedSnippet,
   SessionRecord,
   WorkspaceInfo
 } from '@shared/types'
@@ -517,18 +518,17 @@ export const useAppStore = defineStore('app', () => {
     showToast(`已插入到 ${activeDocRelPath.value}`)
   }
 
-  async function sendChatPrompt(
-    prompt: string,
-    quotes?: Array<{ text: string; docRelPath?: string }>
-  ) {
+  async function sendChatPrompt(prompt: string, quotes?: QuotedSnippet[]) {
     if (!activeWorkspace.value) return
     const cleanPrompt = prompt.trim()
     const cleanQuotes = (quotes || []).filter((q) => q.text.trim())
-    if (!cleanPrompt) return
+    if (!cleanPrompt && cleanQuotes.length === 0) return
 
+    const titleSource = cleanPrompt || cleanQuotes[0]?.text || ''
     const autoTitle =
-      cleanPrompt
+      titleSource
         .replace(/^(帮我写个|帮我写|写个|请帮我|请)/, '')
+        .replace(/^#+\s*/, '')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 24) || '新写作会话'
@@ -556,8 +556,13 @@ export const useAppStore = defineStore('app', () => {
 
     const agentPrompt = cleanQuotes.length
       ? `${cleanQuotes
-          .map((q) => (q.docRelPath ? `> [来自 ${q.docRelPath}] ${q.text}` : `> ${q.text}`))
-          .join('\n\n')}\n\n${cleanPrompt}`
+          .map((q) => {
+            if (q.kind === 'pasted') {
+              return `【用户粘贴的文本内容】\n${q.text}`
+            }
+            return q.docRelPath ? `> [来自 ${q.docRelPath}] ${q.text}` : `> ${q.text}`
+          })
+          .join('\n\n')}${cleanPrompt ? `\n\n${cleanPrompt}` : ''}`
       : cleanPrompt
 
     const mySeq = (sessionTurnSeqMap.get(sess.id) ?? 0) + 1

@@ -72,18 +72,31 @@
           <div v-if="m.role === 'user'" class="user-turn">
             <div class="user-bubble">
               <div v-if="m.quotes && m.quotes.length" class="user-quotes">
-                <div
-                  v-for="(q, qi) in m.quotes"
-                  :key="qi"
-                  class="user-quote-item"
-                  :class="{ clickable: Boolean(q.docRelPath) }"
-                  @click="q.docRelPath && openDoc(q.docRelPath)"
-                >
-                  <span v-if="q.docRelPath" class="uq-doc">{{ shortName(q.docRelPath) }}</span>
-                  <span class="uq-text">{{ q.text }}</span>
-                </div>
+                <template v-for="(q, qi) in m.quotes" :key="qi">
+                  <div
+                    v-if="q.kind === 'pasted'"
+                    class="pasted-card in-msg"
+                    title="点击查看完整粘贴内容"
+                    @click="openPastedPreview(q.text)"
+                  >
+                    <div class="pasted-card-preview">{{ q.text }}</div>
+                    <div class="pasted-card-foot">
+                      <span class="pasted-badge">PASTED</span>
+                      <span class="pasted-meta">{{ formatCharCount(q.text) }}</span>
+                    </div>
+                  </div>
+                  <div
+                    v-else
+                    class="user-quote-item"
+                    :class="{ clickable: Boolean(q.docRelPath) }"
+                    @click="q.docRelPath && openDoc(q.docRelPath)"
+                  >
+                    <span v-if="q.docRelPath" class="uq-doc">{{ shortName(q.docRelPath) }}</span>
+                    <span class="uq-text">{{ q.text }}</span>
+                  </div>
+                </template>
               </div>
-              <div class="user-text">{{ m.text }}</div>
+              <div v-if="m.text" class="user-text">{{ m.text }}</div>
             </div>
             <div class="msg-actions user-actions">
               <span class="msg-time">{{ formatClock(m.timestamp) }}</span>
@@ -251,17 +264,50 @@
           </div>
         </div>
 
+        <!-- Pasted Long-Text Cards (Claude Style) -->
+        <div v-if="pastedCards.length" class="pasted-tray">
+          <div
+            v-for="card in pastedCards"
+            :key="card.id"
+            class="pasted-card"
+            :title="`共 ${card.text.length} 字 · 点击查看或编辑`"
+            @click="openPastedEditor(card)"
+          >
+            <button
+              class="pasted-remove"
+              title="移除粘贴卡片"
+              @click.stop="removePastedCard(card.id)"
+            >
+              <X :size="11" :stroke-width="2" />
+            </button>
+            <div class="pasted-card-preview">{{ card.text }}</div>
+            <div class="pasted-card-foot">
+              <span class="pasted-badge">PASTED</span>
+              <button
+                class="pasted-edit-btn"
+                title="编辑粘贴内容"
+                @click.stop="openPastedEditor(card)"
+              >
+                <Pencil :size="12" :stroke-width="1.8" />
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Auto-Growing Textarea (P0-2) -->
         <textarea
           ref="composerEl"
           v-model="draft"
           rows="2"
           :placeholder="
-            store.quotedSnippets.length
-              ? '针对以上引用提问或下达修改指令…'
-              : '输入指令或问题…（Enter 发送，Shift+Enter 换行）'
+            pastedCards.length
+              ? '针对粘贴内容输入指令或问题…（Enter 发送）'
+              : store.quotedSnippets.length
+                ? '针对以上引用提问或下达修改指令…'
+                : '输入指令或问题…（Enter 发送，Shift+Enter 换行）'
           "
           @keydown="onKeydown"
+          @paste="onComposerPaste"
         />
 
         <!-- Composer Footer with Engine Selector (editable before 1st msg, locked after) + Attached Doc Context Pill -->
@@ -385,7 +431,7 @@
           <button
             v-if="!store.agentBusy"
             class="send-circle"
-            :disabled="!draft.trim()"
+            :disabled="!draft.trim() && pastedCards.length === 0"
             title="发送 (Enter)"
             @click="send"
           >
@@ -394,6 +440,43 @@
           <button v-else class="stop-circle" title="停止" @click="abort">
             <Square :size="11" :stroke-width="2" fill="currentColor" />
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pasted Content Preview / Edit Modal -->
+    <div
+      v-if="pastedModal.open"
+      class="pasted-modal-mask"
+      @click.self="closePastedModal"
+    >
+      <div class="pasted-modal">
+        <div class="pasted-modal-head">
+          <div class="pasted-modal-title">
+            <span class="pasted-badge">PASTED</span>
+            <span class="pasted-modal-stats">{{ formatCharCount(pastedModal.text) }}</span>
+          </div>
+          <button class="pasted-modal-close" title="关闭" @click="closePastedModal">
+            <X :size="15" :stroke-width="1.9" />
+          </button>
+        </div>
+        <textarea
+          v-if="pastedModal.editable"
+          v-model="pastedModal.text"
+          class="pasted-modal-editor"
+          rows="14"
+        />
+        <pre v-else class="pasted-modal-viewer">{{ pastedModal.text }}</pre>
+        <div class="pasted-modal-foot">
+          <button class="btn-outline" @click="copyText(pastedModal.text)">复制全文</button>
+          <div class="pasted-modal-actions">
+            <button class="btn-outline" @click="closePastedModal">
+              {{ pastedModal.editable ? '取消' : '关闭' }}
+            </button>
+            <button v-if="pastedModal.editable" class="btn-primary" @click="savePastedModal">
+              保存修改
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -442,6 +525,20 @@ const emit = defineEmits<{
 
 const store = useAppStore()
 const draft = ref('')
+const pastedCards = ref<Array<{ id: string; text: string }>>([])
+const pastedModal = reactive<{
+  open: boolean
+  editable: boolean
+  cardId: string | null
+  text: string
+}>({
+  open: false,
+  editable: false,
+  cardId: null,
+  text: ''
+})
+const PASTE_CHAR_THRESHOLD = 300
+const PASTE_LINE_THRESHOLD = 6
 const listEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
 const expandedTraces = reactive<Record<string, boolean>>({})
@@ -660,11 +757,73 @@ onMounted(() => {
   nextTick(syncComposerHeight)
 })
 
+function onComposerPaste(e: ClipboardEvent) {
+  const raw = e.clipboardData?.getData('text/plain') || ''
+  if (!raw) return
+  const lineCount = raw.split(/\r?\n/).length
+  if (raw.length >= PASTE_CHAR_THRESHOLD || lineCount >= PASTE_LINE_THRESHOLD) {
+    e.preventDefault()
+    pastedCards.value.push({
+      id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      text: raw.trim()
+    })
+  }
+}
+
+function removePastedCard(id: string) {
+  pastedCards.value = pastedCards.value.filter((c) => c.id !== id)
+}
+
+function openPastedEditor(card: { id: string; text: string }) {
+  pastedModal.open = true
+  pastedModal.editable = true
+  pastedModal.cardId = card.id
+  pastedModal.text = card.text
+}
+
+function openPastedPreview(text: string) {
+  pastedModal.open = true
+  pastedModal.editable = false
+  pastedModal.cardId = null
+  pastedModal.text = text
+}
+
+function closePastedModal() {
+  pastedModal.open = false
+}
+
+function savePastedModal() {
+  if (pastedModal.cardId) {
+    const clean = pastedModal.text.trim()
+    if (!clean) {
+      removePastedCard(pastedModal.cardId)
+    } else {
+      const target = pastedCards.value.find((c) => c.id === pastedModal.cardId)
+      if (target) target.text = clean
+    }
+  }
+  pastedModal.open = false
+}
+
+function formatCharCount(text: string): string {
+  const lines = text.split(/\r?\n/).length
+  return `${text.length} 字 · ${lines} 行`
+}
+
 async function send() {
   const text = draft.value.trim()
-  if (!text) return
-  const quotes = store.quotedSnippets.map((q) => ({ text: q.text, docRelPath: q.docRelPath }))
+  const cards = pastedCards.value.map((c) => ({ text: c.text, kind: 'pasted' as const }))
+  const quotes = [
+    ...cards,
+    ...store.quotedSnippets.map((q) => ({
+      text: q.text,
+      docRelPath: q.docRelPath,
+      kind: 'quote' as const
+    }))
+  ]
+  if (!text && quotes.length === 0) return
   draft.value = ''
+  pastedCards.value = []
   store.clearQuotes()
   nextTick(syncComposerHeight)
   isNearBottom.value = true
@@ -693,7 +852,14 @@ function reEditUserMsg(m: ChatMessage) {
   draft.value = m.text
   if (m.quotes?.length) {
     for (const q of m.quotes) {
-      store.quoteToChat(q.text)
+      if (q.kind === 'pasted') {
+        pastedCards.value.push({
+          id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          text: q.text
+        })
+      } else {
+        store.quoteToChat(q.text)
+      }
     }
   }
   nextTick(() => {
@@ -1740,6 +1906,189 @@ watch(
   background: var(--bg-active);
   color: var(--ink-faint);
   cursor: not-allowed;
+}
+
+/* Claude-style Pasted Content Card */
+.pasted-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 2px 8px;
+}
+.pasted-card {
+  position: relative;
+  width: 142px;
+  height: 114px;
+  border-radius: 11px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-canvas);
+  box-shadow: var(--shadow-card);
+  padding: 10px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  cursor: pointer;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.pasted-card:hover {
+  border-color: var(--ink-faint);
+}
+.pasted-card.in-msg {
+  width: 170px;
+  height: 98px;
+  margin-bottom: 4px;
+}
+.pasted-card-preview {
+  font-size: 11px;
+  line-height: 1.42;
+  color: var(--ink-body);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.pasted-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.pasted-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--ink-muted);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+.pasted-meta {
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+.pasted-edit-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
+  background: var(--bg-subtle);
+}
+.pasted-edit-btn:hover {
+  background: var(--bg-hover);
+  color: var(--ink-primary);
+}
+.pasted-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-canvas);
+  color: var(--ink-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+  box-shadow: var(--shadow-card);
+}
+.pasted-card:hover .pasted-remove {
+  opacity: 1;
+}
+.pasted-remove:hover {
+  background: var(--bg-hover);
+  color: var(--ink-primary);
+}
+.pasted-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.36);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.pasted-modal {
+  width: min(620px, 92vw);
+  max-height: 82vh;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pasted-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.pasted-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pasted-modal-stats {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.pasted-modal-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
+}
+.pasted-modal-editor,
+.pasted-modal-viewer {
+  margin: 0;
+  padding: 14px 16px;
+  flex: 1;
+  min-height: 260px;
+  max-height: 55vh;
+  overflow: auto;
+  border: none;
+  outline: none;
+  resize: none;
+  background: var(--bg-sidebar);
+  color: var(--ink-body);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pasted-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-hairline);
+}
+.pasted-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .stop-circle {
   background: var(--accent);

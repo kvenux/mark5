@@ -36,6 +36,8 @@ pub struct QuotedSnippet {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_rel_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

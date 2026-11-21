@@ -46,6 +46,7 @@ export interface ToolTraceItem {
 export interface QuotedSnippet {
   text: string
   docRelPath?: string
+  kind?: 'quote' | 'pasted'
 }
 
 export interface ChatMessage {
