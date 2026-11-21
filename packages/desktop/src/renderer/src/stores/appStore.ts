@@ -23,6 +23,10 @@ export const useAppStore = defineStore('app', () => {
   const allFiles = ref<FileEntry[]>([])
   const sessions = ref<SessionRecord[]>([])
   const activeSessionId = ref<string | null>(null)
+  const savedEng = (localStorage.getItem('mark5_engine') || 'agy') as AgentEngine
+  const preferredEngine = ref<AgentEngine>(
+    savedEng === 'claude' || savedEng === 'codex' ? savedEng : 'agy'
+  )
 
   const openTabs = ref<string[]>([])
   const activeDocRelPath = ref<string | null>(null)
@@ -171,6 +175,16 @@ export const useAppStore = defineStore('app', () => {
     ])
     files.value = mdTree
     allFiles.value = fullTree
+  }
+
+  async function setActiveSessionEngine(engine: AgentEngine) {
+    preferredEngine.value = engine
+    localStorage.setItem('mark5_engine', engine)
+    const sess = activeSession.value
+    if (sess && sess.messages.length === 0 && activeWorkspace.value) {
+      sess.engine = engine
+      await window.mark5.saveSession(activeWorkspace.value.rootPath, JSON.parse(JSON.stringify(sess)))
+    }
   }
 
   async function createSession(title: string, engine: AgentEngine, initialPrompt?: string) {
@@ -340,7 +354,7 @@ export const useAppStore = defineStore('app', () => {
 
     let sess = activeSession.value
     if (!sess) {
-      sess = await createSession(autoTitle, 'agy')
+      sess = await createSession(autoTitle, preferredEngine.value)
       if (!sess) return
     } else if (
       (sess.title === '新会话' || sess.title === '新写作会话') &&
@@ -398,7 +412,7 @@ export const useAppStore = defineStore('app', () => {
     if (!activeWorkspace.value || !activeDocRelPath.value) return
     let sess = activeSession.value
     if (!sess) {
-      sess = await createSession(activeDocRelPath.value.replace(/\.md$/i, ''), 'agy')
+      sess = await createSession(activeDocRelPath.value.replace(/\.md$/i, ''), preferredEngine.value)
       if (!sess) return
     }
 
@@ -779,6 +793,8 @@ export const useAppStore = defineStore('app', () => {
     sessions,
     activeSessionId,
     activeSession,
+    preferredEngine,
+    setActiveSessionEngine,
     openTabs,
     activeDocRelPath,
     markdown,

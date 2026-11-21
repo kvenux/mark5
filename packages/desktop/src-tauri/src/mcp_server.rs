@@ -52,6 +52,11 @@ impl DocMcpServer {
         *lock = Some(ctx);
     }
 
+    pub async fn get_url(&self) -> String {
+        let p = *self.port.read().await;
+        format!("http://127.0.0.1:{p}/mcp")
+    }
+
     pub fn stop_sync(&self) {
         let bin = resolve_agy_bin();
         let mut cmd = std::process::Command::new(bin);

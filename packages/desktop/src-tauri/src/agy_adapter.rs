@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
-use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use serde_json::{json, Value};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -53,6 +54,7 @@ impl AgyAdapter {
     pub async fn run_turn(
         &self,
         req: SendAgentTurnPayload,
+        engine: String,
         conversation_id: Option<String>,
         on_event: EventCallback,
     ) -> Result<(), String> {
@@ -66,58 +68,25 @@ impl AgyAdapter {
             })
             .await;
 
+        let engine_norm = engine.to_lowercase();
+        let engine_display = match engine_norm.as_str() {
+            "claude" => "Claude Code",
+            "codex" => "Codex",
+            _ => "AGY",
+        };
+
         let full_prompt = build_prompt(&req, &self.mcp.server_name);
-        let bin = resolve_agy_bin();
-        let mut cmd = Command::new(&bin);
-        cmd.arg("--output-format")
-            .arg("stream-json")
-            .arg("--dangerously-skip-permissions")
-            .arg("--add-dir")
-            .arg(&req.root_path);
-        if let Some(ref cid) = conversation_id {
-            if !cid.trim().is_empty() {
-                cmd.arg("--conversation").arg(cid);
-            }
-        }
-        cmd.arg("-p").arg(&full_prompt);
-        cmd.current_dir(&req.root_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null());
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        let mcp_url = self.mcp.get_url().await;
 
-        on_event(AgentStreamEvent {
-            session_id: req.session_id.clone(),
-            kind: "status".to_string(),
-            conversation_id: None,
-            step_index: None,
-            tool_name: None,
-            tool_state: None,
-            tool_detail: None,
-            duration_sec: None,
-            text: Some("正在连接 AGY...".to_string()),
-            error: None,
-        });
+        on_event(make_status_event(
+            &req.session_id,
+            &format!("正在连接 {engine_display}..."),
+        ));
 
-        let mut child: Child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                let msg = format!("启动 AGY 失败 ({bin}): {e}");
-                on_event(AgentStreamEvent {
-                    session_id: req.session_id.clone(),
-                    kind: "error".to_string(),
-                    conversation_id: None,
-                    step_index: None,
-                    tool_name: None,
-                    tool_state: None,
-                    tool_detail: None,
-                    duration_sec: None,
-                    text: None,
-                    error: Some(msg.clone()),
-                });
-                return Err(msg);
-            }
+        let (mut child, bin_label) = match engine_norm.as_str() {
+            "claude" => spawn_claude(&req, &full_prompt, &self.mcp.server_name, &mcp_url, conversation_id.as_deref())?,
+            "codex" => spawn_codex(&req, &full_prompt, &self.mcp.server_name, &mcp_url, conversation_id.as_deref()).await?,
+            _ => spawn_agy(&req, &full_prompt, conversation_id.as_deref())?,
         };
 
         let child_pid = child.id().unwrap_or(0);
@@ -145,6 +114,10 @@ impl AgyAdapter {
 
         let mut accumulated = String::new();
         let mut saw_result = false;
+        let mut step_counter: i64 = 0;
+        let mut claude_tool_steps: HashMap<String, (i64, String)> = HashMap::new();
+        let mut codex_item_steps: HashMap<String, (i64, String)> = HashMap::new();
+        let mut saw_claude_delta = false;
 
         if let Some(so) = stdout {
             let mut reader = BufReader::new(so).lines();
@@ -157,126 +130,43 @@ impl AgyAdapter {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
-                let ev_name = parsed.get("event").and_then(|v| v.as_str()).unwrap_or("");
-                match ev_name {
-                    "init" => {
-                        let cid = parsed
-                            .get("conversation_id")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        if let Some(ref c) = cid {
-                            let _ = self
-                                .workspace
-                                .update_session_conversation_id(&req.root_path, &req.session_id, c)
-                                .await;
-                        }
-                        on_event(AgentStreamEvent {
-                            session_id: req.session_id.clone(),
-                            kind: "init".to_string(),
-                            conversation_id: cid,
-                            step_index: None,
-                            tool_name: None,
-                            tool_state: None,
-                            tool_detail: None,
-                            duration_sec: None,
-                            text: None,
-                            error: None,
-                        });
+
+                match engine_norm.as_str() {
+                    "claude" => {
+                        self.handle_claude_line(
+                            &parsed,
+                            &req,
+                            &on_event,
+                            &mut accumulated,
+                            &mut saw_result,
+                            &mut step_counter,
+                            &mut claude_tool_steps,
+                            &mut saw_claude_delta,
+                        )
+                        .await;
                     }
-                    "tool" => {
-                        let raw_name = parsed
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("tool");
-                        let detail_raw = parsed
-                            .get("detail")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        if is_internal_mcp_schema_read(raw_name, detail_raw) {
-                            continue;
-                        }
-                        let state = match parsed.get("state").and_then(|v| v.as_str()) {
-                            Some("done") | Some("completed") => "done",
-                            Some("error") | Some("failed") => "error",
-                            _ => "running",
-                        };
-                        let readable = format_readable_tool(raw_name, detail_raw);
-                        on_event(AgentStreamEvent {
-                            session_id: req.session_id.clone(),
-                            kind: "tool".to_string(),
-                            conversation_id: None,
-                            step_index: parsed.get("step").and_then(|v| v.as_i64()),
-                            tool_name: Some(raw_name.to_string()),
-                            tool_state: Some(state.to_string()),
-                            tool_detail: Some(readable),
-                            duration_sec: parsed.get("duration").and_then(|v| v.as_f64()),
-                            text: None,
-                            error: None,
-                        });
+                    "codex" => {
+                        self.handle_codex_line(
+                            &parsed,
+                            &req,
+                            &on_event,
+                            &mut accumulated,
+                            &mut saw_result,
+                            &mut step_counter,
+                            &mut codex_item_steps,
+                        )
+                        .await;
                     }
-                    "delta" | "message" | "text" => {
-                        if let Some(chunk) = parsed
-                            .get("text")
-                            .or_else(|| parsed.get("content"))
-                            .and_then(|v| v.as_str())
-                        {
-                            accumulated.push_str(chunk);
-                            on_event(AgentStreamEvent {
-                                session_id: req.session_id.clone(),
-                                kind: "delta".to_string(),
-                                conversation_id: None,
-                                step_index: None,
-                                tool_name: None,
-                                tool_state: None,
-                                tool_detail: None,
-                                duration_sec: None,
-                                text: Some(chunk.to_string()),
-                                error: None,
-                            });
-                        }
+                    _ => {
+                        self.handle_agy_line(
+                            &parsed,
+                            &req,
+                            &on_event,
+                            &mut accumulated,
+                            &mut saw_result,
+                        )
+                        .await;
                     }
-                    "result" => {
-                        saw_result = true;
-                        let final_text = parsed
-                            .get("result")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or(&accumulated)
-                            .to_string();
-                        on_event(AgentStreamEvent {
-                            session_id: req.session_id.clone(),
-                            kind: "done".to_string(),
-                            conversation_id: None,
-                            step_index: None,
-                            tool_name: None,
-                            tool_state: None,
-                            tool_detail: None,
-                            duration_sec: None,
-                            text: Some(final_text),
-                            error: None,
-                        });
-                    }
-                    "error" => {
-                        saw_result = true;
-                        let err_msg = parsed
-                            .get("error")
-                            .or_else(|| parsed.get("message"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("AGY 执行失败")
-                            .to_string();
-                        on_event(AgentStreamEvent {
-                            session_id: req.session_id.clone(),
-                            kind: "error".to_string(),
-                            conversation_id: None,
-                            step_index: None,
-                            tool_name: None,
-                            tool_state: None,
-                            tool_detail: None,
-                            duration_sec: None,
-                            text: None,
-                            error: Some(err_msg),
-                        });
-                    }
-                    _ => {}
                 }
             }
         }
@@ -284,7 +174,6 @@ impl AgyAdapter {
         let status = child.wait().await;
         let stderr_buf = stderr_handle.await.unwrap_or_default();
 
-        // Guard stale child: only clean up if our PID is still the active one
         let still_current = {
             let mut map = self.active_procs.lock().await;
             if map.get(&req.session_id).copied() == Some(child_pid) {
@@ -298,40 +187,598 @@ impl AgyAdapter {
         if still_current && !saw_result {
             let code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
             if code == 0 {
-                on_event(AgentStreamEvent {
-                    session_id: req.session_id.clone(),
-                    kind: "done".to_string(),
-                    conversation_id: None,
-                    step_index: None,
-                    tool_name: None,
-                    tool_state: None,
-                    tool_detail: None,
-                    duration_sec: None,
-                    text: Some(accumulated),
-                    error: None,
-                });
+                on_event(make_done_event(&req.session_id, accumulated));
             } else {
                 let err = if stderr_buf.trim().is_empty() {
-                    format!("AGY 进程异常退出 (code={code})")
+                    format!("{engine_display} ({bin_label}) 进程异常退出 (code={code})")
                 } else {
                     stderr_buf.trim().to_string()
                 };
-                on_event(AgentStreamEvent {
-                    session_id: req.session_id.clone(),
-                    kind: "error".to_string(),
-                    conversation_id: None,
-                    step_index: None,
-                    tool_name: None,
-                    tool_state: None,
-                    tool_detail: None,
-                    duration_sec: None,
-                    text: None,
-                    error: Some(err),
-                });
+                on_event(make_error_event(&req.session_id, err));
             }
         }
 
         Ok(())
+    }
+
+    async fn handle_agy_line(
+        &self,
+        parsed: &Value,
+        req: &SendAgentTurnPayload,
+        on_event: &EventCallback,
+        accumulated: &mut String,
+        saw_result: &mut bool,
+    ) {
+        let ev_name = parsed.get("event").and_then(|v| v.as_str()).unwrap_or("");
+        match ev_name {
+            "init" => {
+                let cid = parsed
+                    .get("conversation_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                if let Some(ref c) = cid {
+                    let _ = self
+                        .workspace
+                        .update_session_conversation_id(&req.root_path, &req.session_id, c)
+                        .await;
+                }
+                on_event(make_init_event(&req.session_id, cid));
+            }
+            "tool" => {
+                let raw_name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+                let detail_raw = parsed.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+                if is_internal_mcp_schema_read(raw_name, detail_raw) {
+                    return;
+                }
+                let state = match parsed.get("state").and_then(|v| v.as_str()) {
+                    Some("done") | Some("completed") => "done",
+                    Some("error") | Some("failed") => "error",
+                    _ => "running",
+                };
+                let readable = format_readable_tool(raw_name, detail_raw);
+                on_event(AgentStreamEvent {
+                    session_id: req.session_id.clone(),
+                    kind: "tool".to_string(),
+                    conversation_id: None,
+                    step_index: parsed.get("step").and_then(|v| v.as_i64()),
+                    tool_name: Some(raw_name.to_string()),
+                    tool_state: Some(state.to_string()),
+                    tool_detail: Some(readable),
+                    duration_sec: parsed.get("duration").and_then(|v| v.as_f64()),
+                    text: None,
+                    error: None,
+                });
+            }
+            "delta" | "message" | "text" => {
+                if let Some(chunk) = parsed
+                    .get("text")
+                    .or_else(|| parsed.get("content"))
+                    .and_then(|v| v.as_str())
+                {
+                    accumulated.push_str(chunk);
+                    on_event(make_delta_event(&req.session_id, chunk));
+                }
+            }
+            "result" => {
+                *saw_result = true;
+                let final_text = parsed
+                    .get("result")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(accumulated.as_str())
+                    .to_string();
+                on_event(make_done_event(&req.session_id, final_text));
+            }
+            "error" => {
+                *saw_result = true;
+                let err_msg = parsed
+                    .get("error")
+                    .or_else(|| parsed.get("message"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("AGY 执行失败")
+                    .to_string();
+                on_event(make_error_event(&req.session_id, err_msg));
+            }
+            _ => {}
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_claude_line(
+        &self,
+        parsed: &Value,
+        req: &SendAgentTurnPayload,
+        on_event: &EventCallback,
+        accumulated: &mut String,
+        saw_result: &mut bool,
+        step_counter: &mut i64,
+        tool_steps: &mut HashMap<String, (i64, String)>,
+        saw_delta: &mut bool,
+    ) {
+        let ev_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match ev_type {
+            "system" => {
+                if parsed.get("subtype").and_then(|v| v.as_str()) == Some("init") {
+                    let sid = parsed
+                        .get("session_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    if let Some(ref c) = sid {
+                        let _ = self
+                            .workspace
+                            .update_session_conversation_id(&req.root_path, &req.session_id, c)
+                            .await;
+                    }
+                    on_event(make_init_event(&req.session_id, sid));
+                }
+            }
+            "stream_event" => {
+                if let Some(ev) = parsed.get("event") {
+                    let inner = ev.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    if inner == "content_block_delta" {
+                        if let Some(txt) = ev.pointer("/delta/text").and_then(|v| v.as_str()) {
+                            *saw_delta = true;
+                            accumulated.push_str(txt);
+                            on_event(make_delta_event(&req.session_id, txt));
+                        }
+                    } else if inner == "content_block_start" {
+                        if ev.pointer("/content_block/type").and_then(|v| v.as_str()) == Some("tool_use") {
+                            let id = ev
+                                .pointer("/content_block/id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let name = ev
+                                .pointer("/content_block/name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("tool")
+                                .to_string();
+                            if !id.is_empty() && !tool_steps.contains_key(&id) {
+                                *step_counter += 1;
+                                let step = *step_counter;
+                                tool_steps.insert(id, (step, name.clone()));
+                                on_event(make_tool_event(
+                                    &req.session_id,
+                                    step,
+                                    &name,
+                                    "running",
+                                    &format_readable_tool(&name, ""),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            "assistant" => {
+                if let Some(blocks) = parsed.pointer("/message/content").and_then(|v| v.as_array()) {
+                    for b in blocks {
+                        let bt = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        if bt == "tool_use" {
+                            let id = b.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let name = b.get("name").and_then(|v| v.as_str()).unwrap_or("tool").to_string();
+                            if !id.is_empty() && !tool_steps.contains_key(&id) {
+                                *step_counter += 1;
+                                let step = *step_counter;
+                                tool_steps.insert(id, (step, name.clone()));
+                                on_event(make_tool_event(
+                                    &req.session_id,
+                                    step,
+                                    &name,
+                                    "running",
+                                    &format_readable_tool(&name, ""),
+                                ));
+                            }
+                        } else if bt == "text" && !*saw_delta {
+                            if let Some(txt) = b.get("text").and_then(|v| v.as_str()) {
+                                accumulated.push_str(txt);
+                                on_event(make_delta_event(&req.session_id, txt));
+                            }
+                        }
+                    }
+                }
+            }
+            "user" => {
+                if let Some(blocks) = parsed.pointer("/message/content").and_then(|v| v.as_array()) {
+                    for b in blocks {
+                        if b.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                            let tid = b.get("tool_use_id").and_then(|v| v.as_str()).unwrap_or("");
+                            let is_err = b.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+                            if let Some((step, name)) = tool_steps.get(tid) {
+                                on_event(make_tool_event(
+                                    &req.session_id,
+                                    *step,
+                                    name,
+                                    if is_err { "error" } else { "done" },
+                                    &format_readable_tool(name, ""),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            "result" => {
+                *saw_result = true;
+                if let Some(sid) = parsed.get("session_id").and_then(|v| v.as_str()) {
+                    let _ = self
+                        .workspace
+                        .update_session_conversation_id(&req.root_path, &req.session_id, sid)
+                        .await;
+                }
+                let is_err = parsed.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+                let result_txt = parsed
+                    .get("result")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(accumulated.as_str())
+                    .to_string();
+                if is_err {
+                    on_event(make_error_event(&req.session_id, result_txt));
+                } else {
+                    on_event(make_done_event(&req.session_id, result_txt));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_codex_line(
+        &self,
+        parsed: &Value,
+        req: &SendAgentTurnPayload,
+        on_event: &EventCallback,
+        accumulated: &mut String,
+        saw_result: &mut bool,
+        step_counter: &mut i64,
+        item_steps: &mut HashMap<String, (i64, String)>,
+    ) {
+        let ev_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match ev_type {
+            "thread.started" => {
+                let tid = parsed
+                    .get("thread_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                if let Some(ref c) = tid {
+                    let _ = self
+                        .workspace
+                        .update_session_conversation_id(&req.root_path, &req.session_id, c)
+                        .await;
+                }
+                on_event(make_init_event(&req.session_id, tid));
+            }
+            "item.started" => {
+                if let Some(item) = parsed.get("item") {
+                    let itype = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    if itype == "mcp_tool_call" || itype == "command_execution" {
+                        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let name = item
+                            .get("tool")
+                            .or_else(|| item.get("command"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(itype)
+                            .to_string();
+                        *step_counter += 1;
+                        let step = *step_counter;
+                        if !id.is_empty() {
+                            item_steps.insert(id, (step, name.clone()));
+                        }
+                        on_event(make_tool_event(
+                            &req.session_id,
+                            step,
+                            &name,
+                            "running",
+                            &format_readable_tool(&name, ""),
+                        ));
+                    }
+                }
+            }
+            "item.completed" => {
+                if let Some(item) = parsed.get("item") {
+                    let itype = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    if itype == "mcp_tool_call" || itype == "command_execution" {
+                        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let is_err = item.get("status").and_then(|v| v.as_str()) == Some("failed")
+                            || item.get("error").is_some();
+                        if let Some((step, name)) = item_steps.get(id) {
+                            on_event(make_tool_event(
+                                &req.session_id,
+                                *step,
+                                name,
+                                if is_err { "error" } else { "done" },
+                                &format_readable_tool(name, ""),
+                            ));
+                        }
+                    } else if itype == "agent_message" {
+                        if let Some(txt) = item.get("text").and_then(|v| v.as_str()) {
+                            if !accumulated.is_empty() {
+                                accumulated.push_str("\n\n");
+                            }
+                            accumulated.push_str(txt);
+                            on_event(make_delta_event(&req.session_id, txt));
+                        }
+                    }
+                }
+            }
+            "turn.completed" => {
+                *saw_result = true;
+                on_event(make_done_event(&req.session_id, accumulated.clone()));
+            }
+            "turn.failed" | "error" => {
+                *saw_result = true;
+                let msg = parsed
+                    .pointer("/error/message")
+                    .or_else(|| parsed.get("message"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Codex 执行失败")
+                    .to_string();
+                on_event(make_error_event(&req.session_id, msg));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn spawn_agy(
+    req: &SendAgentTurnPayload,
+    full_prompt: &str,
+    conversation_id: Option<&str>,
+) -> Result<(Child, String), String> {
+    let bin = resolve_agy_bin();
+    let mut cmd = Command::new(&bin);
+    cmd.arg("--output-format")
+        .arg("stream-json")
+        .arg("--dangerously-skip-permissions")
+        .arg("--add-dir")
+        .arg(&req.root_path);
+    if let Some(cid) = conversation_id.filter(|s| !s.trim().is_empty()) {
+        cmd.arg("--conversation").arg(cid);
+    }
+    cmd.arg("-p").arg(full_prompt);
+    cmd.current_dir(&req.root_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("启动 AGY 失败 ({bin}): {e}"))?;
+    Ok((child, bin))
+}
+
+fn spawn_claude(
+    req: &SendAgentTurnPayload,
+    full_prompt: &str,
+    mcp_name: &str,
+    mcp_url: &str,
+    conversation_id: Option<&str>,
+) -> Result<(Child, String), String> {
+    let bin = resolve_claude_bin();
+    let mcp_cfg = json!({
+        "mcpServers": {
+            mcp_name: {
+                "type": "http",
+                "url": mcp_url
+            }
+        }
+    })
+    .to_string();
+
+    let mut cmd = Command::new(&bin);
+    cmd.arg("-p")
+        .arg("--output-format")
+        .arg("stream-json")
+        .arg("--verbose")
+        .arg("--include-partial-messages")
+        .arg("--dangerously-skip-permissions")
+        .arg("--mcp-config")
+        .arg(&mcp_cfg)
+        .arg("--add-dir")
+        .arg(&req.root_path);
+    if let Some(cid) = conversation_id.filter(|s| !s.trim().is_empty()) {
+        cmd.arg("--resume").arg(cid);
+    }
+    cmd.arg("--").arg(full_prompt);
+    cmd.current_dir(&req.root_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("启动 Claude Code 失败 ({bin}): {e}"))?;
+    Ok((child, bin))
+}
+
+async fn spawn_codex(
+    req: &SendAgentTurnPayload,
+    full_prompt: &str,
+    mcp_name: &str,
+    mcp_url: &str,
+    conversation_id: Option<&str>,
+) -> Result<(Child, String), String> {
+    let mcp_override = format!("mcp_servers.{mcp_name}.url=\"{mcp_url}\"");
+
+    #[cfg(target_os = "windows")]
+    let (bin, mut cmd) = {
+        let mut c = Command::new("cmd.exe");
+        c.arg("/C").arg(resolve_codex_bin());
+        c.creation_flags(CREATE_NO_WINDOW);
+        ("codex".to_string(), c)
+    };
+    #[cfg(not(target_os = "windows"))]
+    let (bin, mut cmd) = {
+        let b = resolve_codex_bin();
+        let c = Command::new(&b);
+        (b, c)
+    };
+
+    if let Some(cid) = conversation_id.filter(|s| !s.trim().is_empty()) {
+        cmd.arg("exec")
+            .arg("resume")
+            .arg("--json")
+            .arg("--skip-git-repo-check")
+            .arg("--dangerously-bypass-approvals-and-sandbox")
+            .arg("-c")
+            .arg(&mcp_override)
+            .arg(cid)
+            .arg("-");
+    } else {
+        cmd.arg("exec")
+            .arg("--json")
+            .arg("--skip-git-repo-check")
+            .arg("--dangerously-bypass-approvals-and-sandbox")
+            .arg("-C")
+            .arg(&req.root_path)
+            .arg("-c")
+            .arg(&mcp_override)
+            .arg("-");
+    }
+
+    cmd.current_dir(&req.root_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("启动 Codex 失败 ({bin}): {e}"))?;
+
+    // Write prompt to stdin and close immediately so codex exec receives EOF cleanly
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(full_prompt.as_bytes()).await;
+        let _ = stdin.shutdown().await;
+    }
+
+    Ok((child, bin))
+}
+
+fn resolve_claude_bin() -> String {
+    if let Ok(custom) = std::env::var("CLAUDE_BIN") {
+        if !custom.trim().is_empty() {
+            return custom;
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let p = Path::new(&profile).join(".local").join("bin").join("claude.exe");
+            if p.exists() {
+                return p.to_string_lossy().to_string();
+            }
+        }
+        "claude.exe".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "claude".to_string()
+    }
+}
+
+fn resolve_codex_bin() -> String {
+    if let Ok(custom) = std::env::var("CODEX_BIN") {
+        if !custom.trim().is_empty() {
+            return custom;
+        }
+    }
+    "codex".to_string()
+}
+
+fn make_status_event(session_id: &str, text: &str) -> AgentStreamEvent {
+    AgentStreamEvent {
+        session_id: session_id.to_string(),
+        kind: "status".to_string(),
+        conversation_id: None,
+        step_index: None,
+        tool_name: None,
+        tool_state: None,
+        tool_detail: None,
+        duration_sec: None,
+        text: Some(text.to_string()),
+        error: None,
+    }
+}
+
+fn make_init_event(session_id: &str, cid: Option<String>) -> AgentStreamEvent {
+    AgentStreamEvent {
+        session_id: session_id.to_string(),
+        kind: "init".to_string(),
+        conversation_id: cid,
+        step_index: None,
+        tool_name: None,
+        tool_state: None,
+        tool_detail: None,
+        duration_sec: None,
+        text: None,
+        error: None,
+    }
+}
+
+fn make_delta_event(session_id: &str, text: &str) -> AgentStreamEvent {
+    AgentStreamEvent {
+        session_id: session_id.to_string(),
+        kind: "delta".to_string(),
+        conversation_id: None,
+        step_index: None,
+        tool_name: None,
+        tool_state: None,
+        tool_detail: None,
+        duration_sec: None,
+        text: Some(text.to_string()),
+        error: None,
+    }
+}
+
+fn make_tool_event(
+    session_id: &str,
+    step: i64,
+    name: &str,
+    state: &str,
+    detail: &str,
+) -> AgentStreamEvent {
+    AgentStreamEvent {
+        session_id: session_id.to_string(),
+        kind: "tool".to_string(),
+        conversation_id: None,
+        step_index: Some(step),
+        tool_name: Some(name.to_string()),
+        tool_state: Some(state.to_string()),
+        tool_detail: Some(detail.to_string()),
+        duration_sec: None,
+        text: None,
+        error: None,
+    }
+}
+
+fn make_done_event(session_id: &str, text: String) -> AgentStreamEvent {
+    AgentStreamEvent {
+        session_id: session_id.to_string(),
+        kind: "done".to_string(),
+        conversation_id: None,
+        step_index: None,
+        tool_name: None,
+        tool_state: None,
+        tool_detail: None,
+        duration_sec: None,
+        text: Some(text),
+        error: None,
+    }
+}
+
+fn make_error_event(session_id: &str, error: String) -> AgentStreamEvent {
+    AgentStreamEvent {
+        session_id: session_id.to_string(),
+        kind: "error".to_string(),
+        conversation_id: None,
+        step_index: None,
+        tool_name: None,
+        tool_state: None,
+        tool_detail: None,
+        duration_sec: None,
+        text: None,
+        error: Some(error),
     }
 }
 
@@ -355,7 +802,10 @@ async fn kill_pid(pid: u32) {
 fn is_internal_mcp_schema_read(name: &str, detail: &str) -> bool {
     let lower = detail.to_lowercase();
     (name == "read_file" || name == "view_file")
-        && (lower.contains("mark5-doc") || lower.contains("doc_create_skeleton.json") || lower.contains("doc_replace_block.json") || lower.contains("doc_read_blocks.json"))
+        && (lower.contains("mark5-doc")
+            || lower.contains("doc_create_skeleton.json")
+            || lower.contains("doc_replace_block.json")
+            || lower.contains("doc_read_blocks.json"))
 }
 
 fn format_readable_tool(name: &str, detail: &str) -> String {

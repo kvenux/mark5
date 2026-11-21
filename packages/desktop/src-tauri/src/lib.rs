@@ -251,12 +251,16 @@ async fn send_agent_turn(
         .workspace
         .get_session(&payload.root_path, &payload.session_id)
         .await;
+    let engine = existing
+        .as_ref()
+        .map(|s| s.engine.clone())
+        .unwrap_or_else(|| "agy".to_string());
     let conv_id = existing.and_then(|s| s.conversation_id);
     let app_clone = app.clone();
     let on_event = Arc::new(move |ev: crate::types::AgentStreamEvent| {
         let _ = app_clone.emit("mc:agent-event", ev);
     });
-    state.agy.run_turn(payload, conv_id, on_event).await
+    state.agy.run_turn(payload, engine, conv_id, on_event).await
 }
 
 #[tauri::command]

@@ -264,10 +264,23 @@
           @keydown="onKeydown"
         />
 
-        <!-- Composer Footer with Engine + Attached Doc Context Pill (P2-4) -->
+        <!-- Composer Footer with Engine Selector (editable before 1st msg, locked after) + Attached Doc Context Pill -->
         <div class="composer-bar">
           <div class="composer-meta">
-            <span class="engine-label">{{ engineLabel(store.activeSession?.engine || 'agy') }}</span>
+            <select
+              v-if="messages.length === 0"
+              class="engine-select"
+              :value="currentEngine"
+              title="选择本会话使用的 AI 引擎（发送首条消息后永久绑定）"
+              @change="onEngineChange"
+            >
+              <option value="agy">AGY</option>
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex</option>
+            </select>
+            <span v-else class="engine-label" title="本会话已绑定的 AI 引擎">
+              {{ engineLabel(currentEngine) }}
+            </span>
             <button
               v-if="contextDocRelPath"
               class="context-doc-chip"
@@ -341,6 +354,9 @@ const isNearBottom = ref(true)
 let appliedQuoteSeq = 0
 
 const messages = computed(() => store.activeSession?.messages || [])
+const currentEngine = computed<AgentEngine>(
+  () => store.activeSession?.engine || store.preferredEngine || 'agy'
+)
 const contextDocRelPath = computed(
   () => store.activeDocRelPath || store.activeSession?.docRelPath || null
 )
@@ -430,9 +446,14 @@ function summarizeTools(m: ChatMessage, expanded: boolean): string {
 }
 
 function engineLabel(eng: AgentEngine) {
-  if (eng === 'claude') return 'Claude'
+  if (eng === 'claude') return 'Claude Code'
   if (eng === 'codex') return 'Codex'
   return 'AGY'
+}
+
+function onEngineChange(e: Event) {
+  const val = (e.target as HTMLSelectElement).value as AgentEngine
+  void store.setActiveSessionEngine(val)
 }
 
 async function openDoc(relPath: string) {
@@ -1336,6 +1357,22 @@ watch(
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+.engine-select {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-body);
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.engine-select:hover {
+  border-color: var(--border-soft);
+  color: var(--ink-primary);
 }
 .engine-label {
   font-size: 11.5px;

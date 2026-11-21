@@ -116,7 +116,7 @@ function switchMode(next: 'files' | 'docs' | 'collab') {
 
 async function handleNewSession() {
   mode.value = 'collab'
-  await store.createSession('新会话', 'agy')
+  await store.createSession('新会话', store.preferredEngine)
 }
 
 watch(
