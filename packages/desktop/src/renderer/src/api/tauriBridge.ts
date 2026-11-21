@@ -25,6 +25,16 @@ export function installTauriMark5Bridge(): void {
       invoke<string>('read_markdown_file', { rootPath, relPath }),
     writeMarkdownFile: (rootPath, relPath, content) =>
       invoke<void>('write_markdown_file', { rootPath, relPath, content }),
+    renameEntry: (rootPath, oldRelPath, newName) =>
+      invoke<string>('rename_entry', { rootPath, oldRelPath, newName }),
+    duplicateFile: (rootPath, relPath) =>
+      invoke<string>('duplicate_file', { rootPath, relPath }),
+    deleteEntry: (rootPath, relPath) =>
+      invoke<void>('delete_entry', { rootPath, relPath }),
+    createFolder: (rootPath, parentRelPath, folderName) =>
+      invoke<string>('create_folder', { rootPath, parentRelPath, folderName }),
+    revealInExplorer: (rootPath, relPath) =>
+      invoke<void>('reveal_in_explorer', { rootPath, relPath }),
 
     listSessions: (rootPath) => invoke<SessionRecord[]>('list_sessions', { rootPath }),
     createSession: (payload) => invoke<SessionRecord>('create_session', { payload }),

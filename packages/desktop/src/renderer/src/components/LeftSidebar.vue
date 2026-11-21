@@ -233,7 +233,13 @@
           :depth="0"
           :active-path="store.activeDocRelPath"
           :force-open="Boolean(query.trim())"
+          :renaming-path="renamingFilePath"
+          :rename-draft="fileRenameDraft"
           @select="store.openDocument($event)"
+          @open-menu="openFileMenu"
+          @update:rename-draft="fileRenameDraft = $event"
+          @commit-rename="commitFileRename"
+          @cancel-rename="cancelFileRename"
         />
         <div v-if="!filteredAllFileTree.length" class="empty-muted">当前工作区暂无文件</div>
       </template>
@@ -247,9 +253,27 @@
           :class="{ active: f.relPath === store.activeDocRelPath }"
           :title="f.relPath"
           @click="store.openDocument(f.relPath)"
+          @contextmenu.prevent.stop="openFileMenu(f, $event)"
         >
           <FileText :size="14" :stroke-width="1.75" class="doc-list-icon" />
-          <span class="item-title">{{ f.relPath }}</span>
+          <input
+            v-if="renamingFilePath === f.relPath"
+            v-model="fileRenameDraft"
+            class="rename-input"
+            @click.stop
+            @keydown.enter.stop="commitFileRename"
+            @keydown.esc.stop="cancelFileRename"
+            @blur="commitFileRename"
+          />
+          <span v-else class="item-title">{{ f.relPath }}</span>
+          <button
+            v-if="renamingFilePath !== f.relPath"
+            class="doc-more-dots"
+            title="更多操作"
+            @click.stop="openFileMenu(f, $event)"
+          >
+            ···
+          </button>
         </div>
         <div v-if="!filteredMdFiles.length" class="empty-muted">当前目录暂无 Markdown 文档</div>
 
@@ -297,6 +321,44 @@
       </button>
       <button class="smenu-item danger" @click="onMenuDelete(menuSession.id)">
         <span>删除</span>
+        <span class="kbd">D</span>
+      </button>
+    </div>
+
+    <!-- Claude-Style Floating File / Folder Context Menu -->
+    <div
+      v-if="fileMenuEntry"
+      class="session-menu file-context-menu"
+      :style="{ top: fileMenuPos.top + 'px', left: fileMenuPos.left + 'px' }"
+      @click.stop
+    >
+      <template v-if="fileMenuEntry.isDir">
+        <button class="smenu-item" @click="onFileNewDoc(fileMenuEntry)">
+          <span>新建 Markdown</span>
+          <span class="kbd">N</span>
+        </button>
+        <button class="smenu-item" @click="onFileNewFolder(fileMenuEntry)">
+          <span>新建子文件夹</span>
+        </button>
+        <div class="smenu-sep" />
+      </template>
+      <button class="smenu-item" @click="onFileStartRename(fileMenuEntry)">
+        <span>重命名</span>
+        <span class="kbd">R</span>
+      </button>
+      <button v-if="!fileMenuEntry.isDir" class="smenu-item" @click="onFileDuplicate(fileMenuEntry)">
+        <span>创建副本</span>
+      </button>
+      <button class="smenu-item" @click="onFileCopyPath(fileMenuEntry)">
+        <span>复制路径</span>
+        <span class="kbd">C</span>
+      </button>
+      <button class="smenu-item" @click="onFileReveal(fileMenuEntry)">
+        <span>在资源管理器中显示</span>
+      </button>
+      <div class="smenu-sep" />
+      <button class="smenu-item danger" @click="onFileDelete(fileMenuEntry)">
+        <span>{{ fileMenuEntry.isDir ? '删除文件夹' : '删除' }}</span>
         <span class="kbd">D</span>
       </button>
     </div>
@@ -361,6 +423,11 @@ const menuSessionId = ref<string | null>(null)
 const menuPos = reactive({ top: 100, left: 120 })
 const renamingId = ref<string | null>(null)
 const renameDraft = ref('')
+
+const fileMenuEntry = ref<FileEntry | null>(null)
+const fileMenuPos = reactive({ top: 100, left: 120 })
+const renamingFilePath = ref<string | null>(null)
+const fileRenameDraft = ref('')
 
 const menuSession = computed(
   () => store.sessions.find((s) => s.id === menuSessionId.value) ?? null
@@ -485,12 +552,95 @@ function formatTime(ts: number): string {
   return `${d.getMonth() + 1}-${d.getDate()}`
 }
 
+function openFileMenu(entry: FileEntry, e: MouseEvent) {
+  menuSessionId.value = null
+  const target = e.currentTarget as HTMLElement | null
+  const rect = target?.getBoundingClientRect()
+  const anchorY = e.type === 'contextmenu' ? e.clientY : (rect ? rect.bottom + 4 : e.clientY)
+  const anchorX = e.type === 'contextmenu' ? e.clientX : (rect ? rect.right - 140 : e.clientX)
+  fileMenuPos.top = Math.min(window.innerHeight - 280, Math.max(48, anchorY))
+  fileMenuPos.left = Math.min(window.innerWidth - 216, Math.max(24, anchorX))
+  fileMenuEntry.value = entry
+}
+
+async function onFileStartRename(entry: FileEntry) {
+  fileMenuEntry.value = null
+  renamingFilePath.value = entry.relPath
+  fileRenameDraft.value = entry.name
+  await nextTick()
+  const inp = (document.querySelector('.tree-rename-input') ||
+    document.querySelector('.doc-list-item .rename-input')) as HTMLInputElement | null
+  if (inp) {
+    inp.focus()
+    const dot = !entry.isDir ? entry.name.lastIndexOf('.') : -1
+    if (dot > 0) inp.setSelectionRange(0, dot)
+    else inp.select()
+  }
+}
+
+async function commitFileRename() {
+  const oldPath = renamingFilePath.value
+  if (!oldPath) return
+  renamingFilePath.value = null
+  const nextName = fileRenameDraft.value.trim()
+  if (!nextName) return
+  await store.renameFileOrDir(oldPath, nextName)
+}
+
+function cancelFileRename() {
+  renamingFilePath.value = null
+}
+
+async function onFileDuplicate(entry: FileEntry) {
+  fileMenuEntry.value = null
+  await store.duplicateWorkspaceFile(entry.relPath)
+}
+
+async function onFileCopyPath(entry: FileEntry) {
+  fileMenuEntry.value = null
+  try {
+    await navigator.clipboard.writeText(entry.relPath)
+    store.showToast(`已复制路径：${entry.relPath}`)
+  } catch {
+    store.showToast('复制失败')
+  }
+}
+
+async function onFileReveal(entry: FileEntry) {
+  fileMenuEntry.value = null
+  await store.revealInExplorer(entry.relPath)
+}
+
+async function onFileDelete(entry: FileEntry) {
+  fileMenuEntry.value = null
+  const label = entry.isDir ? `文件夹「${entry.name}」及其全部内容` : `文件「${entry.name}」`
+  if (!window.confirm(`确定要永久删除${label}吗？`)) return
+  await store.deleteFileOrDir(entry.relPath)
+}
+
+async function onFileNewDoc(entry: FileEntry) {
+  fileMenuEntry.value = null
+  const created = await store.createDocInFolder(entry.relPath)
+  if (created) {
+    const name = created.split('/').pop() || created
+    await onFileStartRename({ name, relPath: created, isDir: false })
+  }
+}
+
+async function onFileNewFolder(entry: FileEntry) {
+  fileMenuEntry.value = null
+  const folderName = window.prompt(`在「${entry.name}」下新建子文件夹名称：`)
+  if (!folderName || !folderName.trim()) return
+  await store.createSubFolder(entry.relPath, folderName.trim())
+}
+
 const closeMenu = () => {
   menuSessionId.value = null
+  fileMenuEntry.value = null
 }
 
 const onKeyShortcut = (e: KeyboardEvent) => {
-  if (!menuSession.value) return
+  if (!menuSession.value && !fileMenuEntry.value) return
   if (e.ctrlKey || e.metaKey || e.altKey) return
   if (
     e.target instanceof HTMLElement &&
@@ -499,7 +649,29 @@ const onKeyShortcut = (e: KeyboardEvent) => {
     return
   }
   const key = e.key.toLowerCase()
-  const s = menuSession.value
+  if (key === 'escape') {
+    menuSessionId.value = null
+    fileMenuEntry.value = null
+    return
+  }
+  if (fileMenuEntry.value) {
+    const entry = fileMenuEntry.value
+    if (key === 'r') {
+      e.preventDefault()
+      void onFileStartRename(entry)
+    } else if (key === 'c') {
+      e.preventDefault()
+      void onFileCopyPath(entry)
+    } else if (key === 'd') {
+      e.preventDefault()
+      void onFileDelete(entry)
+    } else if (key === 'n' && entry.isDir) {
+      e.preventDefault()
+      void onFileNewDoc(entry)
+    }
+    return
+  }
+  const s = menuSession.value!
   if (key === 'p') {
     e.preventDefault()
     onMenuPin(s.id)
@@ -512,8 +684,6 @@ const onKeyShortcut = (e: KeyboardEvent) => {
   } else if (key === 'd') {
     e.preventDefault()
     onMenuDelete(s.id)
-  } else if (key === 'escape') {
-    menuSessionId.value = null
   }
 }
 
@@ -807,22 +977,22 @@ onUnmounted(() => {
 .session-menu {
   position: fixed;
   z-index: 70;
-  width: 176px;
+  width: 196px;
   background: var(--bg-canvas);
   border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  padding: 5px;
-  box-shadow: var(--shadow-pop);
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 12px 32px rgba(26, 25, 24, 0.14), 0 2px 6px rgba(26, 25, 24, 0.06);
 }
 .smenu-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 7px 10px;
-  border-radius: 7px;
-  font-size: 13px;
-  color: var(--ink-body);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--ink-primary);
 }
 .smenu-item:hover {
   background: var(--bg-subtle);
@@ -831,24 +1001,43 @@ onUnmounted(() => {
   color: #b91c1c;
 }
 .kbd {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-faint);
 }
 .smenu-sep {
   height: 1px;
   background: var(--border-hairline);
-  margin: 4px 6px;
+  margin: 5px 8px;
 }
 .doc-list-item {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 10px;
+  padding: 6px 6px 6px 10px;
   border-radius: 7px;
   font-size: 13px;
   color: var(--ink-body);
   cursor: pointer;
   margin-bottom: 1px;
+}
+.doc-more-dots {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--ink-muted);
+  background: var(--bg-active);
+  flex-shrink: 0;
+}
+.doc-list-item:hover .doc-more-dots {
+  display: inline-flex;
+}
+.doc-more-dots:hover {
+  color: var(--ink-primary);
 }
 .doc-list-item:hover {
   background: var(--bg-hover);

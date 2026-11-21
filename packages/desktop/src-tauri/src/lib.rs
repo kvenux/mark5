@@ -126,6 +126,73 @@ async fn write_markdown_file(
 }
 
 #[tauri::command]
+async fn rename_entry(
+    state: State<'_, AppState>,
+    root_path: String,
+    old_rel_path: String,
+    new_name: String,
+) -> Result<String, String> {
+    state
+        .workspace
+        .rename_entry(&root_path, &old_rel_path, &new_name)
+        .await
+}
+
+#[tauri::command]
+async fn duplicate_file(
+    state: State<'_, AppState>,
+    root_path: String,
+    rel_path: String,
+) -> Result<String, String> {
+    state.workspace.duplicate_file(&root_path, &rel_path).await
+}
+
+#[tauri::command]
+async fn delete_entry(
+    state: State<'_, AppState>,
+    root_path: String,
+    rel_path: String,
+) -> Result<(), String> {
+    state.workspace.delete_entry(&root_path, &rel_path).await
+}
+
+#[tauri::command]
+async fn create_folder(
+    state: State<'_, AppState>,
+    root_path: String,
+    parent_rel_path: String,
+    folder_name: String,
+) -> Result<String, String> {
+    state
+        .workspace
+        .create_folder(&root_path, &parent_rel_path, &folder_name)
+        .await
+}
+
+#[tauri::command]
+async fn reveal_in_explorer(root_path: String, rel_path: String) -> Result<(), String> {
+    let full = Path::new(&root_path).join(&rel_path);
+    #[cfg(target_os = "windows")]
+    {
+        let arg = format!("/select,{}", full.to_string_lossy());
+        let _ = std::process::Command::new("explorer").arg(arg).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .args(["-R", &full.to_string_lossy()])
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(parent) = full.parent() {
+            let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn sync_live_document(
     state: State<'_, AppState>,
     root_path: String,
@@ -442,6 +509,11 @@ pub fn run() {
             list_workspace_all_files,
             read_markdown_file,
             write_markdown_file,
+            rename_entry,
+            duplicate_file,
+            delete_entry,
+            create_folder,
+            reveal_in_explorer,
             sync_live_document,
             list_sessions,
             create_session,

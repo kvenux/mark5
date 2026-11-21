@@ -181,6 +181,11 @@ export interface Mark5API {
   listWorkspaceAllFiles(rootPath: string): Promise<FileEntry[]>
   readMarkdownFile(rootPath: string, relPath: string): Promise<string>
   writeMarkdownFile(rootPath: string, relPath: string, content: string): Promise<void>
+  renameEntry?: (rootPath: string, oldRelPath: string, newName: string) => Promise<string>
+  duplicateFile?: (rootPath: string, relPath: string) => Promise<string>
+  deleteEntry?: (rootPath: string, relPath: string) => Promise<void>
+  createFolder?: (rootPath: string, parentRelPath: string, folderName: string) => Promise<string>
+  revealInExplorer?: (rootPath: string, relPath: string) => Promise<void>
 
   // Sessions & metadata (.mark5/)
   listSessions(rootPath: string): Promise<SessionRecord[]>

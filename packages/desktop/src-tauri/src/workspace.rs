@@ -249,6 +249,156 @@ impl WorkspaceManager {
         self.atomic_write(&full_path, content).await
     }
 
+    fn validate_segment(name: &str) -> Result<String, String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty()
+            || trimmed == "."
+            || trimmed == ".."
+            || trimmed.contains('/')
+            || trimmed.contains('\\')
+            || trimmed.contains(':')
+            || trimmed.contains('*')
+            || trimmed.contains('?')
+            || trimmed.contains('"')
+            || trimmed.contains('<')
+            || trimmed.contains('>')
+            || trimmed.contains('|')
+        {
+            return Err("名称包含非法字符或为空".to_string());
+        }
+        Ok(trimmed.to_string())
+    }
+
+    pub async fn rename_entry(
+        &self,
+        root_path: &str,
+        old_rel_path: &str,
+        new_name: &str,
+    ) -> Result<String, String> {
+        let clean_name = Self::validate_segment(new_name)?;
+        let old_full = Path::new(root_path).join(old_rel_path);
+        if !old_full.exists() {
+            return Err("源文件或目录不存在".to_string());
+        }
+        let parent_rel = Path::new(old_rel_path)
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let new_rel = if parent_rel.is_empty() {
+            clean_name.clone()
+        } else {
+            format!("{parent_rel}/{clean_name}")
+        };
+        if new_rel == old_rel_path {
+            return Ok(new_rel);
+        }
+        let new_full = Path::new(root_path).join(&new_rel);
+        if new_full.exists() {
+            return Err(format!("目标已存在：{clean_name}"));
+        }
+        fs::rename(&old_full, &new_full)
+            .await
+            .map_err(|e| format!("重命名失败：{e}"))?;
+
+        let old_key = Self::key_of(root_path, old_rel_path);
+        let new_key = Self::key_of(root_path, &new_rel);
+        let mut live = self.live_docs.write().await;
+        if let Some(content) = live.remove(&old_key) {
+            live.insert(new_key, content);
+        }
+        Ok(new_rel)
+    }
+
+    pub async fn duplicate_file(
+        &self,
+        root_path: &str,
+        rel_path: &str,
+    ) -> Result<String, String> {
+        let src_full = Path::new(root_path).join(rel_path);
+        if !src_full.is_file() {
+            return Err("仅支持复制文件".to_string());
+        }
+        let parent_rel = Path::new(rel_path)
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let stem = src_full
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+        let ext = src_full
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|e| format!(".{e}"))
+            .unwrap_or_default();
+
+        let mut idx = 1usize;
+        let new_rel = loop {
+            let suffix = if idx == 1 {
+                "-副本".to_string()
+            } else {
+                format!("-副本{idx}")
+            };
+            let cand_name = format!("{stem}{suffix}{ext}");
+            let cand_rel = if parent_rel.is_empty() {
+                cand_name
+            } else {
+                format!("{parent_rel}/{cand_name}")
+            };
+            if !Path::new(root_path).join(&cand_rel).exists() {
+                break cand_rel;
+            }
+            idx += 1;
+        };
+
+        let dst_full = Path::new(root_path).join(&new_rel);
+        fs::copy(&src_full, &dst_full)
+            .await
+            .map_err(|e| format!("复制文件失败：{e}"))?;
+        Ok(new_rel)
+    }
+
+    pub async fn delete_entry(&self, root_path: &str, rel_path: &str) -> Result<(), String> {
+        if rel_path.trim().is_empty() || rel_path.contains("..") {
+            return Err("非法路径".to_string());
+        }
+        let full = Path::new(root_path).join(rel_path);
+        if !full.exists() {
+            return Ok(());
+        }
+        if full.is_dir() {
+            fs::remove_dir_all(&full)
+                .await
+                .map_err(|e| format!("删除目录失败：{e}"))?;
+        } else {
+            fs::remove_file(&full)
+                .await
+                .map_err(|e| format!("删除文件失败：{e}"))?;
+        }
+        let key = Self::key_of(root_path, rel_path);
+        self.live_docs.write().await.remove(&key);
+        Ok(())
+    }
+
+    pub async fn create_folder(
+        &self,
+        root_path: &str,
+        parent_rel_path: &str,
+        folder_name: &str,
+    ) -> Result<String, String> {
+        let clean_name = Self::validate_segment(folder_name)?;
+        let new_rel = if parent_rel_path.trim().is_empty() {
+            clean_name
+        } else {
+            format!("{}/{}", parent_rel_path.trim_end_matches('/'), clean_name)
+        };
+        let full = Path::new(root_path).join(&new_rel);
+        fs::create_dir_all(&full)
+            .await
+            .map_err(|e| format!("创建目录失败：{e}"))?;
+        Ok(new_rel)
+    }
+
     // ---------- Sessions ----------
     pub async fn list_sessions(&self, root_path: &str) -> Vec<SessionRecord> {
         let meta = match self.ensure_meta_dir(root_path).await {

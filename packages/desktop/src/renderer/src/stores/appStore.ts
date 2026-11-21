@@ -354,6 +354,92 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function renameFileOrDir(oldRelPath: string, newName: string) {
+    if (!activeWorkspace.value || !window.mark5.renameEntry) return
+    try {
+      const newRelPath = await window.mark5.renameEntry(
+        activeWorkspace.value.rootPath,
+        oldRelPath,
+        newName
+      )
+      if (newRelPath === oldRelPath) return
+
+      const rewrite = (p: string) => {
+        if (p === oldRelPath) return newRelPath
+        if (p.startsWith(oldRelPath + '/')) return newRelPath + p.slice(oldRelPath.length)
+        return p
+      }
+      openTabs.value = openTabs.value.map(rewrite)
+      if (activeDocRelPath.value) {
+        activeDocRelPath.value = rewrite(activeDocRelPath.value)
+      }
+      for (const s of sessions.value) {
+        if (s.docRelPath) s.docRelPath = rewrite(s.docRelPath)
+      }
+      await refreshFiles()
+      showToast(`已重命名为 ${newName}`)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function duplicateWorkspaceFile(relPath: string) {
+    if (!activeWorkspace.value || !window.mark5.duplicateFile) return
+    try {
+      const copyRel = await window.mark5.duplicateFile(activeWorkspace.value.rootPath, relPath)
+      await refreshFiles()
+      await openDocument(copyRel)
+      showToast(`已创建副本：${copyRel}`)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function deleteFileOrDir(relPath: string) {
+    if (!activeWorkspace.value || !window.mark5.deleteEntry) return
+    try {
+      await window.mark5.deleteEntry(activeWorkspace.value.rootPath, relPath)
+      const affected = openTabs.value.filter(
+        (t) => t === relPath || t.startsWith(relPath + '/')
+      )
+      for (const tab of affected) {
+        await closeTab(tab)
+      }
+      await refreshFiles()
+      showToast(`已删除：${relPath}`)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function createDocInFolder(dirRelPath: string) {
+    if (!activeWorkspace.value) return
+    const name = `未命名-${Date.now().toString().slice(-4)}.md`
+    const relPath = dirRelPath ? `${dirRelPath}/${name}` : name
+    const today = new Date().toISOString().slice(0, 10)
+    const initial = `# 未命名文档\n\n> ${today} · 你\n\n`
+    await window.mark5.writeMarkdownFile(activeWorkspace.value.rootPath, relPath, initial)
+    await refreshFiles()
+    await openDocument(relPath)
+    return relPath
+  }
+
+  async function createSubFolder(parentRelPath: string, folderName: string) {
+    if (!activeWorkspace.value || !window.mark5.createFolder) return
+    try {
+      await window.mark5.createFolder(activeWorkspace.value.rootPath, parentRelPath, folderName)
+      await refreshFiles()
+      showToast(`已创建文件夹：${folderName}`)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function revealInExplorer(relPath: string) {
+    if (!activeWorkspace.value || !window.mark5.revealInExplorer) return
+    await window.mark5.revealInExplorer(activeWorkspace.value.rootPath, relPath)
+  }
+
   async function onEditorMarkdownChanged(newMd: string, saveToDisk = true) {
     markdown.value = newMd
     if (!activeWorkspace.value || !activeDocRelPath.value) return
@@ -894,6 +980,12 @@ export const useAppStore = defineStore('app', () => {
     stopSession,
     openDocument,
     closeTab,
+    renameFileOrDir,
+    duplicateWorkspaceFile,
+    deleteFileOrDir,
+    createDocInFolder,
+    createSubFolder,
+    revealInExplorer,
     onEditorMarkdownChanged,
     appendToCurrentDocument,
     sendChatPrompt,
