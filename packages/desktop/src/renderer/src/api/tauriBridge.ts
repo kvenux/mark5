@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import type {
   AgentDocOp,
   AgentStreamEvent,
+  CliStatusItem,
   CommentThread,
   FileEntry,
   HistorySnapshot,
@@ -61,6 +62,12 @@ export function installTauriMark5Bridge(): void {
     },
 
     openNewWindow: () => invoke<void>('open_new_window'),
+    checkCliStatus: (paths) =>
+      invoke<CliStatusItem[]>('check_cli_status', {
+        agyPath: paths?.agyPath || null,
+        claudePath: paths?.claudePath || null,
+        codexPath: paths?.codexPath || null
+      }),
 
     onAgentEvent: (cb) => {
       let unlisten: (() => void) | null = null

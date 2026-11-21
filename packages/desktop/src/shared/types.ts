@@ -1,4 +1,21 @@
 export type AgentEngine = 'agy' | 'claude' | 'codex'
+export type AppTheme = 'warm' | 'light' | 'dark'
+
+export interface AppSettings {
+  theme: AppTheme
+  editorFontSize: number
+  editorMaxWidth: number
+  defaultEngine: AgentEngine
+  models: Record<AgentEngine, string>
+  cliPaths: Record<AgentEngine, string>
+}
+
+export interface CliStatusItem {
+  engine: AgentEngine
+  available: boolean
+  version: string
+  resolvedPath: string
+}
 
 export interface WorkspaceInfo {
   id: string
@@ -42,6 +59,7 @@ export interface SessionRecord {
   workspacePath: string
   title: string
   engine: AgentEngine
+  model?: string
   conversationId?: string
   docRelPath?: string
   isArtifact?: boolean
@@ -191,6 +209,8 @@ export interface Mark5API {
     sessionId: string
     rootPath: string
     prompt: string
+    model?: string
+    cliPath?: string
     docRelPath?: string
     currentMarkdown?: string
     threadContext?: {
@@ -214,8 +234,13 @@ export interface Mark5API {
     html?: string
   }): Promise<{ ok: boolean; outPath?: string; message?: string }>
 
-  // Multi-window support
+  // Multi-window & CLI diagnostics
   openNewWindow?: () => Promise<void>
+  checkCliStatus?: (paths?: {
+    agyPath?: string
+    claudePath?: string
+    codexPath?: string
+  }) => Promise<CliStatusItem[]>
 
   // Subscriptions from main -> renderer
   onAgentEvent(cb: (ev: AgentStreamEvent) => void): () => void

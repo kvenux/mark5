@@ -4,12 +4,50 @@ import type {
   AgentDocOp,
   AgentEngine,
   AgentStreamEvent,
+  AppSettings,
   CommentThread,
   FileEntry,
   HistorySnapshot,
   SessionRecord,
   WorkspaceInfo
 } from '@shared/types'
+
+const DEFAULT_SETTINGS: AppSettings = {
+  theme: 'warm',
+  editorFontSize: 15,
+  editorMaxWidth: 720,
+  defaultEngine: 'agy',
+  models: { agy: '', claude: '', codex: '' },
+  cliPaths: { agy: '', claude: '', codex: '' }
+}
+
+function loadSavedSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem('mark5_settings')
+    if (!raw) return { ...DEFAULT_SETTINGS, models: { ...DEFAULT_SETTINGS.models }, cliPaths: { ...DEFAULT_SETTINGS.cliPaths } }
+    const parsed = JSON.parse(raw) as Partial<AppSettings>
+    return {
+      theme: parsed.theme === 'light' || parsed.theme === 'dark' ? parsed.theme : 'warm',
+      editorFontSize: Number(parsed.editorFontSize) || 15,
+      editorMaxWidth: Number(parsed.editorMaxWidth) || 720,
+      defaultEngine:
+        parsed.defaultEngine === 'claude' || parsed.defaultEngine === 'codex'
+          ? parsed.defaultEngine
+          : 'agy',
+      models: { ...DEFAULT_SETTINGS.models, ...(parsed.models || {}) },
+      cliPaths: { ...DEFAULT_SETTINGS.cliPaths, ...(parsed.cliPaths || {}) }
+    }
+  } catch {
+    return { ...DEFAULT_SETTINGS, models: { ...DEFAULT_SETTINGS.models }, cliPaths: { ...DEFAULT_SETTINGS.cliPaths } }
+  }
+}
+
+function applyThemeToDom(s: AppSettings) {
+  const root = document.documentElement
+  root.setAttribute('data-theme', s.theme)
+  root.style.setProperty('--editor-font-size', `${s.editorFontSize}px`)
+  root.style.setProperty('--editor-max-width', `${s.editorMaxWidth}px`)
+}
 
 export interface QueuedBlockAnim {
   id: string
@@ -23,10 +61,22 @@ export const useAppStore = defineStore('app', () => {
   const allFiles = ref<FileEntry[]>([])
   const sessions = ref<SessionRecord[]>([])
   const activeSessionId = ref<string | null>(null)
-  const savedEng = (localStorage.getItem('mark5_engine') || 'agy') as AgentEngine
-  const preferredEngine = ref<AgentEngine>(
-    savedEng === 'claude' || savedEng === 'codex' ? savedEng : 'agy'
-  )
+  const settings = ref<AppSettings>(loadSavedSettings())
+  const preferredEngine = ref<AgentEngine>(settings.value.defaultEngine)
+  applyThemeToDom(settings.value)
+
+  function updateSettings(patch: Partial<AppSettings>) {
+    settings.value = {
+      ...settings.value,
+      ...patch,
+      models: { ...settings.value.models, ...(patch.models || {}) },
+      cliPaths: { ...settings.value.cliPaths, ...(patch.cliPaths || {}) }
+    }
+    preferredEngine.value = settings.value.defaultEngine
+    localStorage.setItem('mark5_settings', JSON.stringify(settings.value))
+    localStorage.setItem('mark5_engine', settings.value.defaultEngine)
+    applyThemeToDom(settings.value)
+  }
 
   const openTabs = ref<string[]>([])
   const activeDocRelPath = ref<string | null>(null)
@@ -384,10 +434,15 @@ export const useAppStore = defineStore('app', () => {
     sessionBusyMap.value[sess.id] = true
     sessionLiveStatusMap.value[sess.id] = '正在启动 AGY...'
     try {
+      const eng = sess.engine || 'agy'
+      const activeModel = sess.model || settings.value.models[eng] || undefined
+      const activeCliPath = settings.value.cliPaths[eng] || undefined
       await window.mark5.sendAgentTurn({
         sessionId: sess.id,
         rootPath: activeWorkspace.value.rootPath,
         prompt: agentPrompt,
+        model: activeModel,
+        cliPath: activeCliPath,
         docRelPath: activeDocRelPath.value ?? sess.docRelPath,
         currentMarkdown: markdown.value
       })
@@ -443,10 +498,14 @@ export const useAppStore = defineStore('app', () => {
     sessionBusyMap.value[targetSessionId] = true
     sessionLiveStatusMap.value[targetSessionId] = '正在处理批注...'
     try {
+      const targetSess = activeSession.value
+      const eng: AgentEngine = targetSess?.engine || 'agy'
       await window.mark5.sendAgentTurn({
         sessionId: targetSessionId,
         rootPath: activeWorkspace.value.rootPath,
         prompt: text,
+        model: targetSess?.model || settings.value.models[eng] || undefined,
+        cliPath: settings.value.cliPaths[eng] || undefined,
         docRelPath: activeDocRelPath.value,
         currentMarkdown: markdown.value,
         threadContext: {
@@ -486,10 +545,14 @@ export const useAppStore = defineStore('app', () => {
     sessionBusyMap.value[targetSessionId] = true
     sessionLiveStatusMap.value[targetSessionId] = '正在回复批注...'
     try {
+      const targetSess = activeSession.value
+      const eng: AgentEngine = targetSess?.engine || 'agy'
       await window.mark5.sendAgentTurn({
         sessionId: targetSessionId,
         rootPath: activeWorkspace.value.rootPath,
         prompt: text,
+        model: targetSess?.model || settings.value.models[eng] || undefined,
+        cliPath: settings.value.cliPaths[eng] || undefined,
         docRelPath: activeDocRelPath.value,
         currentMarkdown: markdown.value,
         threadContext: {
@@ -793,6 +856,8 @@ export const useAppStore = defineStore('app', () => {
     sessions,
     activeSessionId,
     activeSession,
+    settings,
+    updateSettings,
     preferredEngine,
     setActiveSessionEngine,
     openTabs,

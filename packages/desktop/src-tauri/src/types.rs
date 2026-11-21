@@ -63,6 +63,8 @@ pub struct SessionRecord {
     pub title: String,
     pub engine: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_rel_path: Option<String>,
@@ -150,6 +152,10 @@ pub struct SendAgentTurnPayload {
     pub root_path: String,
     pub prompt: String,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub cli_path: Option<String>,
+    #[serde(default)]
     pub doc_rel_path: Option<String>,
     #[serde(default)]
     pub current_markdown: Option<String>,
@@ -164,7 +170,18 @@ pub struct CreateSessionPayload {
     pub title: String,
     pub engine: String,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub doc_rel_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliStatusItem {
+    pub engine: String,
+    pub available: bool,
+    pub version: String,
+    pub resolved_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

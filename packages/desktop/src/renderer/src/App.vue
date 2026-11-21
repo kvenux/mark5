@@ -7,6 +7,7 @@
       @update:mode="switchMode"
       @collapse="showSidebar = false"
       @new-session="handleNewSession"
+      @open-settings="openSettings('appearance')"
     />
 
     <!-- Middle Chat Pane (only in 'collab' AI writing mode) -->
@@ -17,6 +18,7 @@
       :pane-width="chatWidth"
       @expand-sidebar="showSidebar = true"
       @open-doc="showDoc = true"
+      @open-model-settings="openSettings('backend')"
     />
 
     <!-- Draggable Resizer between ChatPane and MuyaEditorPane (P1-6) -->
@@ -63,6 +65,12 @@
       </div>
     </div>
 
+    <SettingsModal
+      v-if="showSettings"
+      :initial-tab="settingsTab"
+      @close="showSettings = false"
+    />
+
     <div v-if="store.toastMessage" class="toast">{{ store.toastMessage }}</div>
   </div>
 </template>
@@ -73,12 +81,20 @@ import { useAppStore } from '@/stores/appStore'
 import LeftSidebar from '@/components/LeftSidebar.vue'
 import ChatPane from '@/components/ChatPane.vue'
 import MuyaEditorPane from '@/components/MuyaEditorPane.vue'
+import SettingsModal from '@/components/SettingsModal.vue'
 
 const store = useAppStore()
 const mode = ref<'files' | 'docs' | 'collab'>('docs')
 const showSidebar = ref(true)
 const showDoc = ref(true)
 const showHistory = ref(false)
+const showSettings = ref(false)
+const settingsTab = ref<'appearance' | 'backend'>('appearance')
+
+function openSettings(tab: 'appearance' | 'backend') {
+  settingsTab.value = tab
+  showSettings.value = true
+}
 
 const savedWidth = Number(localStorage.getItem('mc_chat_width') || 390)
 const chatWidth = ref(Number.isFinite(savedWidth) ? Math.min(560, Math.max(300, savedWidth)) : 390)
@@ -132,6 +148,9 @@ const onWindowKeydown = (e: KeyboardEvent) => {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
     e.preventDefault()
     void window.mark5.openNewWindow?.()
+  } else if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+    e.preventDefault()
+    openSettings('appearance')
   }
 }
 

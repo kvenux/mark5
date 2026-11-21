@@ -282,6 +282,13 @@
               {{ engineLabel(currentEngine) }}
             </span>
             <button
+              class="model-chip"
+              :title="`当前模型参数：${activeModelDisplay}（点击配置）`"
+              @click="$emit('open-model-settings')"
+            >
+              {{ activeModelDisplay }}
+            </button>
+            <button
               v-if="contextDocRelPath"
               class="context-doc-chip"
               :title="`当前上下文文档：${contextDocRelPath}`"
@@ -343,6 +350,7 @@ withDefaults(
 const emit = defineEmits<{
   (e: 'expand-sidebar'): void
   (e: 'open-doc'): void
+  (e: 'open-model-settings'): void
 }>()
 
 const store = useAppStore()
@@ -357,6 +365,10 @@ const messages = computed(() => store.activeSession?.messages || [])
 const currentEngine = computed<AgentEngine>(
   () => store.activeSession?.engine || store.preferredEngine || 'agy'
 )
+const activeModelDisplay = computed(() => {
+  const m = store.activeSession?.model || store.settings.models[currentEngine.value]
+  return m && m.trim() ? m.trim() : '默认模型'
+})
 const contextDocRelPath = computed(
   () => store.activeDocRelPath || store.activeSession?.docRelPath || null
 )
@@ -1382,6 +1394,23 @@ watch(
   border-radius: 6px;
   background: var(--bg-subtle);
   flex-shrink: 0;
+}
+.model-chip {
+  font-size: 11px;
+  color: var(--ink-muted);
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border-hairline);
+  background: transparent;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.model-chip:hover {
+  background: var(--bg-subtle);
+  color: var(--ink-primary);
 }
 .context-doc-chip {
   display: inline-flex;

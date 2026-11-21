@@ -316,13 +316,16 @@
       <button class="icon-btn" title="打开工作区目录" @click="store.pickWorkspace()">
         <FolderPlus :size="15" :stroke-width="1.75" />
       </button>
+      <button class="icon-btn" title="设置 (Ctrl+,)" @click="$emit('open-settings')">
+        <Settings :size="15" :stroke-width="1.75" />
+      </button>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { FileText, FolderPlus, PanelLeftClose, Plus, Search, SquarePlus } from 'lucide-vue-next'
+import { FileText, FolderPlus, PanelLeftClose, Plus, Search, Settings, SquarePlus } from 'lucide-vue-next'
 import type { FileEntry } from '@shared/types'
 import { useAppStore } from '@/stores/appStore'
 import FileTreeNode from './FileTreeNode.vue'
@@ -335,6 +338,7 @@ defineEmits<{
   (e: 'update:mode', mode: 'files' | 'docs' | 'collab'): void
   (e: 'collapse'): void
   (e: 'new-session'): void
+  (e: 'open-settings'): void
 }>()
 
 const store = useAppStore()

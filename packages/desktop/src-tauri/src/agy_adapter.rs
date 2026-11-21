@@ -522,13 +522,21 @@ fn spawn_agy(
     full_prompt: &str,
     conversation_id: Option<&str>,
 ) -> Result<(Child, String), String> {
-    let bin = resolve_agy_bin();
+    let bin = req
+        .cli_path
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(resolve_agy_bin);
     let mut cmd = Command::new(&bin);
     cmd.arg("--output-format")
         .arg("stream-json")
         .arg("--dangerously-skip-permissions")
         .arg("--add-dir")
         .arg(&req.root_path);
+    if let Some(m) = req.model.as_deref().filter(|s| !s.trim().is_empty()) {
+        cmd.arg("--model").arg(m.trim());
+    }
     if let Some(cid) = conversation_id.filter(|s| !s.trim().is_empty()) {
         cmd.arg("--conversation").arg(cid);
     }
@@ -553,7 +561,12 @@ fn spawn_claude(
     mcp_url: &str,
     conversation_id: Option<&str>,
 ) -> Result<(Child, String), String> {
-    let bin = resolve_claude_bin();
+    let bin = req
+        .cli_path
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(resolve_claude_bin);
     let mcp_cfg = json!({
         "mcpServers": {
             mcp_name: {
@@ -575,6 +588,9 @@ fn spawn_claude(
         .arg(&mcp_cfg)
         .arg("--add-dir")
         .arg(&req.root_path);
+    if let Some(m) = req.model.as_deref().filter(|s| !s.trim().is_empty()) {
+        cmd.arg("--model").arg(m.trim());
+    }
     if let Some(cid) = conversation_id.filter(|s| !s.trim().is_empty()) {
         cmd.arg("--resume").arg(cid);
     }
@@ -600,19 +616,24 @@ async fn spawn_codex(
     conversation_id: Option<&str>,
 ) -> Result<(Child, String), String> {
     let mcp_override = format!("mcp_servers.{mcp_name}.url=\"{mcp_url}\"");
+    let codex_bin = req
+        .cli_path
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(resolve_codex_bin);
 
     #[cfg(target_os = "windows")]
     let (bin, mut cmd) = {
         let mut c = Command::new("cmd.exe");
-        c.arg("/C").arg(resolve_codex_bin());
+        c.arg("/C").arg(&codex_bin);
         c.creation_flags(CREATE_NO_WINDOW);
-        ("codex".to_string(), c)
+        (codex_bin.clone(), c)
     };
     #[cfg(not(target_os = "windows"))]
     let (bin, mut cmd) = {
-        let b = resolve_codex_bin();
-        let c = Command::new(&b);
-        (b, c)
+        let c = Command::new(&codex_bin);
+        (codex_bin.clone(), c)
     };
 
     if let Some(cid) = conversation_id.filter(|s| !s.trim().is_empty()) {
@@ -622,9 +643,11 @@ async fn spawn_codex(
             .arg("--skip-git-repo-check")
             .arg("--dangerously-bypass-approvals-and-sandbox")
             .arg("-c")
-            .arg(&mcp_override)
-            .arg(cid)
-            .arg("-");
+            .arg(&mcp_override);
+        if let Some(m) = req.model.as_deref().filter(|s| !s.trim().is_empty()) {
+            cmd.arg("--model").arg(m.trim());
+        }
+        cmd.arg(cid).arg("-");
     } else {
         cmd.arg("exec")
             .arg("--json")
@@ -633,8 +656,11 @@ async fn spawn_codex(
             .arg("-C")
             .arg(&req.root_path)
             .arg("-c")
-            .arg(&mcp_override)
-            .arg("-");
+            .arg(&mcp_override);
+        if let Some(m) = req.model.as_deref().filter(|s| !s.trim().is_empty()) {
+            cmd.arg("--model").arg(m.trim());
+        }
+        cmd.arg("-");
     }
 
     cmd.current_dir(&req.root_path)
@@ -655,7 +681,7 @@ async fn spawn_codex(
     Ok((child, bin))
 }
 
-fn resolve_claude_bin() -> String {
+pub fn resolve_claude_bin() -> String {
     if let Ok(custom) = std::env::var("CLAUDE_BIN") {
         if !custom.trim().is_empty() {
             return custom;
@@ -677,7 +703,7 @@ fn resolve_claude_bin() -> String {
     }
 }
 
-fn resolve_codex_bin() -> String {
+pub fn resolve_codex_bin() -> String {
     if let Ok(custom) = std::env::var("CODEX_BIN") {
         if !custom.trim().is_empty() {
             return custom;

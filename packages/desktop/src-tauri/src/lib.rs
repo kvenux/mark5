@@ -10,11 +10,12 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWin
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
-use crate::agy_adapter::AgyAdapter;
-use crate::mcp_server::DocMcpServer;
+use crate::agy_adapter::{resolve_claude_bin, resolve_codex_bin, AgyAdapter};
+use crate::mcp_server::{resolve_agy_bin, DocMcpServer};
 use crate::types::{
-    CommentThread, CreateSessionPayload, ExportDocPayload, ExportDocResult, FileEntry,
-    HistorySnapshot, SaveHistoryPayload, SendAgentTurnPayload, SessionRecord, WorkspaceInfo,
+    CliStatusItem, CommentThread, CreateSessionPayload, ExportDocPayload, ExportDocResult,
+    FileEntry, HistorySnapshot, SaveHistoryPayload, SendAgentTurnPayload, SessionRecord,
+    WorkspaceInfo,
 };
 use crate::workspace::WorkspaceManager;
 
@@ -157,6 +158,7 @@ async fn create_session(
         workspace_path: payload.root_path.clone(),
         title: payload.title,
         engine: payload.engine,
+        model: payload.model,
         conversation_id: None,
         doc_rel_path: payload.doc_rel_path,
         is_artifact: Some(false),
@@ -323,6 +325,77 @@ async fn export_document(
 }
 
 #[tauri::command]
+async fn check_cli_status(
+    agy_path: Option<String>,
+    claude_path: Option<String>,
+    codex_path: Option<String>,
+) -> Result<Vec<CliStatusItem>, String> {
+    let specs = [
+        (
+            "agy",
+            agy_path
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(resolve_agy_bin),
+            false,
+        ),
+        (
+            "claude",
+            claude_path
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(resolve_claude_bin),
+            false,
+        ),
+        (
+            "codex",
+            codex_path
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(resolve_codex_bin),
+            true,
+        ),
+    ];
+
+    let mut out = Vec::new();
+    for (eng, bin, via_cmd) in specs {
+        let mut cmd = if cfg!(target_os = "windows") && via_cmd {
+            let mut c = tokio::process::Command::new("cmd.exe");
+            c.args(["/C", &bin, "--version"]);
+            c
+        } else {
+            let mut c = tokio::process::Command::new(&bin);
+            c.arg("--version");
+            c
+        };
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+        match cmd.output().await {
+            Ok(res) if res.status.success() => {
+                let ver = String::from_utf8_lossy(&res.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("已安装")
+                    .trim()
+                    .to_string();
+                out.push(CliStatusItem {
+                    engine: eng.to_string(),
+                    available: true,
+                    version: ver,
+                    resolved_path: bin,
+                });
+            }
+            _ => {
+                out.push(CliStatusItem {
+                    engine: eng.to_string(),
+                    available: false,
+                    version: "未检测到".to_string(),
+                    resolved_path: bin,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
 async fn open_new_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let idx = state.win_counter.fetch_add(1, Ordering::SeqCst) + 1;
     let label = format!("mark5-win-{idx}");
@@ -381,6 +454,7 @@ pub fn run() {
             send_agent_turn,
             abort_agent_turn,
             export_document,
+            check_cli_status,
             open_new_window,
         ])
         .build(tauri::generate_context!())
