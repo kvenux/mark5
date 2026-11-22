@@ -2,11 +2,9 @@
 
 # Mark 5
 
-**7 MB 极轻体积，Claude Docs 式的 AI 原生 Markdown 编辑器。**
+**AI Native 时代的所见即所得 Markdown 编辑器。**
 
-Typora 级暖白排版 + 划词批注与 AI 原地改稿，双开复杂长文不到 200 MB，挂在后台只占 80 MB。
-
-**7 MB 体积** · **197 MB 双开** · **80 MB 后台** · **Claude Code / Codex / AGY**
+Claude Docs 级交互体验，支持划词批注与 AI 无缝原地改稿；7 MB 极轻体积，极低内存占用，直连 Claude Code / Codex / AGY。
 
 <br />
 
