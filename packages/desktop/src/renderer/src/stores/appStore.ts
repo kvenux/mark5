@@ -65,17 +65,31 @@ export const useAppStore = defineStore('app', () => {
   const activeSessionId = ref<string | null>(null)
   const settings = ref<AppSettings>(loadSavedSettings())
   const preferredEngine = ref<AgentEngine>(settings.value.defaultEngine)
-  const engineModels = ref<Record<AgentEngine, ModelOption[]>>({
-    agy: [],
-    claude: [],
-    codex: []
-  })
+  function loadCachedModels(): Record<AgentEngine, ModelOption[]> {
+    const empty: Record<AgentEngine, ModelOption[]> = { agy: [], claude: [], codex: [] }
+    try {
+      const raw = localStorage.getItem('mark5_engine_models')
+      if (!raw) return empty
+      const parsed = JSON.parse(raw)
+      return {
+        agy: Array.isArray(parsed?.agy) ? parsed.agy : [],
+        claude: Array.isArray(parsed?.claude) ? parsed.claude : [],
+        codex: Array.isArray(parsed?.codex) ? parsed.codex : []
+      }
+    } catch {
+      return empty
+    }
+  }
+
+  const engineModels = ref<Record<AgentEngine, ModelOption[]>>(loadCachedModels())
   const modelsLoading = ref<Record<AgentEngine, boolean>>({
     agy: false,
     claude: false,
     codex: false
   })
-  const modelsFetched = new Set<AgentEngine>()
+  const modelsFetched = new Set<AgentEngine>(
+    (['agy', 'claude', 'codex'] as AgentEngine[]).filter((e) => engineModels.value[e].length > 0)
+  )
   applyThemeToDom(settings.value)
 
   async function fetchEngineModels(engine: AgentEngine, force = false) {
@@ -85,8 +99,15 @@ export const useAppStore = defineStore('app', () => {
     try {
       const cliPath = settings.value.cliPaths[engine] || undefined
       const list = await window.mark5.listEngineModels(engine, cliPath)
-      engineModels.value[engine] = list
-      modelsFetched.add(engine)
+      if (list.length > 0 || force) {
+        engineModels.value[engine] = list
+        modelsFetched.add(engine)
+        try {
+          localStorage.setItem('mark5_engine_models', JSON.stringify(engineModels.value))
+        } catch {
+          // ignore storage quota errors
+        }
+      }
     } catch {
       // Keep existing cached list on failure
     } finally {

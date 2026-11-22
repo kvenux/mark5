@@ -577,7 +577,9 @@ function toggleModelMenu() {
   modelMenuOpen.value = !modelMenuOpen.value
   if (modelMenuOpen.value) {
     modelQuery.value = ''
-    void store.fetchEngineModels(currentEngine.value)
+    if ((store.engineModels[currentEngine.value] || []).length === 0) {
+      void store.fetchEngineModels(currentEngine.value)
+    }
     nextTick(() => modelFilterInputEl.value?.focus())
   }
 }
@@ -606,15 +608,10 @@ function onDocClickForModelMenu(ev: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('click', onDocClickForModelMenu)
-  void store.fetchEngineModels(currentEngine.value)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClickForModelMenu)
-})
-
-watch(currentEngine, (eng) => {
-  void store.fetchEngineModels(eng)
 })
 const contextDocRelPath = computed(
   () => store.activeDocRelPath || store.activeSession?.docRelPath || null
