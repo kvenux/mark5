@@ -91,7 +91,7 @@
       @touchstart.passive="onUserScroll"
     >
       <div ref="hostWrapEl" class="muya-host">
-        <!-- Human Presence Caret (stays blinking in the doc when focus moves to ChatPane!) -->
+        <!-- Human Presence Caret (clean blinking caret in the doc when focus moves to ChatPane) -->
         <div
           v-if="humanCaret.hasPos && !humanCaret.inEditor && !animState.running"
           class="human-presence-caret"
@@ -99,10 +99,7 @@
             transform: `translate(${humanCaret.x}px, ${humanCaret.y}px)`,
             height: humanCaret.height + 'px'
           }"
-          title="你当前在文档中的光标焦点"
-        >
-          <span class="human-presence-tag">你</span>
-        </div>
+        />
         <!-- Persistent Left-Gutter Change Bars (VS Code Git-diff style, click to review diff) -->
         <div
           v-for="bar in changedBarRects"

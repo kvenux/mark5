@@ -466,7 +466,7 @@ button.btn-primary:hover {
   color: var(--blockquote-text-color);
 }
 
-/* Human Presence Caret (stays blinking in the doc when focus moves into ChatPane) */
+/* Human Presence Caret (clean blinking caret in the doc when focus moves into ChatPane) */
 .human-presence-caret {
   position: absolute;
   left: 0;
@@ -481,26 +481,6 @@ button.btn-primary:hover {
 
 [data-theme='dark'] .human-presence-caret {
   background: #60a5fa;
-}
-
-.human-presence-tag {
-  position: absolute;
-  left: -1px;
-  top: -17px;
-  padding: 0 5px;
-  height: 16px;
-  line-height: 16px;
-  border-radius: 4px 4px 4px 1px;
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
-}
-
-[data-theme='dark'] .human-presence-tag {
-  background: #3b82f6;
 }
 
 @keyframes mcHumanCaretBlink {

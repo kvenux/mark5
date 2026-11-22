@@ -701,6 +701,22 @@ export const useAppStore = defineStore('app', () => {
     threads.value.unshift(thread)
     await persistThreads()
 
+    // Also mirror the comment into the bound session's chat stream so the user sees full context in ChatPane
+    sess.messages.push({
+      id: `m-${Date.now()}`,
+      role: 'user',
+      text,
+      quotes: quote
+        ? [{ text: quote, docRelPath: activeDocRelPath.value, kind: 'quote' }]
+        : undefined,
+      timestamp: Date.now()
+    })
+    sess.updatedAt = Date.now()
+    await window.mark5.saveSession(
+      activeWorkspace.value.rootPath,
+      JSON.parse(JSON.stringify(sess))
+    )
+
     const targetSessionId = sess.id
     const mySeq = (sessionTurnSeqMap.get(targetSessionId) ?? 0) + 1
     sessionTurnSeqMap.set(targetSessionId, mySeq)
@@ -748,6 +764,22 @@ export const useAppStore = defineStore('app', () => {
       timestamp: Date.now()
     })
     await persistThreads()
+
+    // Mirror comment reply into the bound session's chat stream as well
+    sess.messages.push({
+      id: `m-${Date.now()}`,
+      role: 'user',
+      text,
+      quotes: thread.quote
+        ? [{ text: thread.quote, docRelPath: activeDocRelPath.value, kind: 'quote' }]
+        : undefined,
+      timestamp: Date.now()
+    })
+    sess.updatedAt = Date.now()
+    await window.mark5.saveSession(
+      activeWorkspace.value.rootPath,
+      JSON.parse(JSON.stringify(sess))
+    )
 
     const targetSessionId = sess.id
     const mySeq = (sessionTurnSeqMap.get(targetSessionId) ?? 0) + 1
