@@ -77,14 +77,32 @@
       v-show="store.activeDocRelPath && isMarkdownFile"
       ref="scrollEl"
       class="muya-scroll"
-      :class="{ 'with-comment-rail': showCommentRail }"
+      :class="{
+        'with-comment-rail': showCommentRail,
+        'compact-comment-rail': showCommentRail && isCompactCommentRail
+      }"
       @mouseup="handleSelectionMouseUp"
       @mousedown="handleEditorMouseDown"
+      @keyup="captureHumanCaretPosition"
+      @focusin="onEditorFocusIn"
+      @focusout="onEditorFocusOut"
       @click="activeMarginThreadId = null"
       @wheel.passive="onUserScroll"
       @touchstart.passive="onUserScroll"
     >
       <div ref="hostWrapEl" class="muya-host">
+        <!-- Human Presence Caret (stays blinking in the doc when focus moves to ChatPane!) -->
+        <div
+          v-if="humanCaret.hasPos && !humanCaret.inEditor && !animState.running"
+          class="human-presence-caret"
+          :style="{
+            transform: `translate(${humanCaret.x}px, ${humanCaret.y}px)`,
+            height: humanCaret.height + 'px'
+          }"
+          title="你当前在文档中的光标焦点"
+        >
+          <span class="human-presence-tag">你</span>
+        </div>
         <!-- Persistent Left-Gutter Change Bars (VS Code Git-diff style, click to review diff) -->
         <div
           v-for="bar in changedBarRects"
@@ -172,10 +190,9 @@
           <div
             v-if="animState.showStream && animState.streamText"
             ref="streamPreviewEl"
-            class="agent-stream-preview"
-          >
-            <span>{{ animState.streamText }}</span><span class="agent-caret" />
-          </div>
+            class="agent-stream-preview stream-md"
+            v-html="renderStreamMd(animState.streamText)"
+          />
         </div>
 
         <!-- Quiet Floating Agent Status Pill -->
@@ -569,6 +586,7 @@ const emit = defineEmits<{
   (e: 'expand-sidebar'): void
   (e: 'close-doc'): void
   (e: 'open-history'): void
+  (e: 'comment-sent'): void
 }>()
 
 const store = useAppStore()
@@ -634,8 +652,63 @@ const activeEngineDisplayName = computed(() => {
 
 const openThreadsCount = computed(() => store.threads.filter((t) => !t.resolved).length)
 const showCommentRail = computed(
-  () => openThreadsCount.value > 0 && scrollPaneWidth.value >= 820
+  () => openThreadsCount.value > 0 && scrollPaneWidth.value >= 560
 )
+const isCompactCommentRail = computed(
+  () => scrollPaneWidth.value >= 560 && scrollPaneWidth.value < 860
+)
+
+// Human Focus Presence Caret (keeps blinking at user's last doc caret when focus moves to ChatPane)
+const humanCaret = reactive({
+  hasPos: false,
+  inEditor: false,
+  x: 0,
+  y: 0,
+  height: 20,
+  blockIndex: -1
+})
+
+function captureHumanCaretPosition() {
+  const wrap = hostWrapEl.value
+  const root = muyaContainerEl.value?.querySelector('.mu-container')
+  if (!wrap || !root) return
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return
+  const range = sel.getRangeAt(0)
+  if (!root.contains(range.startContainer)) return
+
+  const wRect = wrap.getBoundingClientRect()
+  const caretRange = range.cloneRange()
+  caretRange.collapse(false)
+  const rects = caretRange.getClientRects()
+  let rect = rects.length > 0 ? rects[rects.length - 1] : caretRange.getBoundingClientRect()
+
+  if (!rect || (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.left === 0)) {
+    const elNode =
+      range.endContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.endContainer as HTMLElement)
+        : range.endContainer.parentElement
+    if (elNode) rect = elNode.getBoundingClientRect()
+  }
+  if (!rect || (rect.top === 0 && rect.left === 0)) return
+
+  humanCaret.x = Math.max(4, Math.round(rect.left - wRect.left))
+  humanCaret.y = Math.max(4, Math.round(rect.top - wRect.top))
+  humanCaret.height = Math.min(34, Math.max(17, Math.round(rect.height || 20)))
+  humanCaret.hasPos = true
+}
+
+function onEditorFocusIn() {
+  humanCaret.inEditor = true
+  captureHumanCaretPosition()
+}
+
+function onEditorFocusOut(e: FocusEvent) {
+  const next = e.relatedTarget as Node | null
+  if (next && scrollEl.value?.contains(next)) return
+  captureHumanCaretPosition()
+  humanCaret.inEditor = false
+}
 
 const marginThreadGroups = computed(() => {
   void marginTick.value
@@ -700,6 +773,18 @@ function toggleCommentExpand(msgId: string) {
   nextTick(() => {
     marginTick.value += 1
   })
+}
+
+function renderStreamMd(mdText: string): string {
+  const html = commentMd.render(mdText || '')
+  const safe = DOMPurify.sanitize(html)
+  // Inject inline blinking agent caret right before the last closing block tag so it flows naturally with formatted text
+  const caretHtml = '<span class="agent-caret"></span>'
+  const idx = safe.lastIndexOf('</')
+  if (idx > 0) {
+    return safe.slice(0, idx) + caretHtml + safe.slice(idx)
+  }
+  return safe + caretHtml
 }
 
 function renderCommentMd(text: string): string {
@@ -1185,6 +1270,8 @@ watch(
   () => store.activeDocRelPath,
   () => {
     clearChangedReview()
+    humanCaret.hasPos = false
+    humanCaret.inEditor = false
   }
 )
 
@@ -1530,103 +1617,156 @@ async function drainOpQueue() {
     const nextBlockMarkdown =
       op.type === 'delete_block' ? '' : (op.newMarkdown ?? '')
 
-    if (!animState.skipAll) {
-      animState.activeBlockIndex = targetIdx
-      animState.phase = 'lock'
-      animState.progress = 0
-      animState.streamText = ''
-      animState.showStream = false
-      animState.badge =
-        animState.batchTotal > 1 ? `${animState.batchCurrent}/${animState.batchTotal}` : ''
-      positionOverlayOnBlock(targetIdx, op.label, `定位第 ${targetIdx + 1} 段`, true)
-      await sleep(remainingForDoc >= 3 ? 220 : 380)
-      while (animState.paused && animState.runId === myRunId) await sleep(80)
+    // Split multi-block chapter inserts/expansions into individual paragraph-level unit blocks
+    // so each block types with live Markdown rendering and commits immediately to Muya!
+    const rawUnits =
+      op.type === 'delete_block' ? [''] : splitTopBlocks(nextBlockMarkdown)
+    const unitBlocks = rawUnits.length > 0 ? rawUnits : [nextBlockMarkdown]
+    if (unitBlocks.length > 1) {
+      animState.batchTotal += unitBlocks.length - 1
+    }
+
+    for (let u = 0; u < unitBlocks.length; u++) {
       if (animState.runId !== myRunId) return
-    }
+      if (u > 0) {
+        animState.batchCurrent += 1
+      }
+      const unitMd = unitBlocks[u]
+      const unitType: PendingBlockChange['type'] =
+        op.type === 'delete_block'
+          ? 'delete_block'
+          : op.type === 'insert_block' || u > 0
+            ? 'insert_block'
+            : 'replace_block'
+      const unitIdx = targetIdx + u
+      const unitOldMd = unitType === 'replace_block' ? prevBlockMarkdown : ''
+      const remainingUnits = remainingForDoc + (unitBlocks.length - 1 - u)
 
-    if ((op.type === 'replace_block' || op.type === 'insert_block') && !animState.skip) {
-      const readable = formatReadableStreamText(op.newMarkdown)
-      const chars = Array.from(readable)
-      const totalChars = chars.length
+      animState.skip = animState.skipAll
 
-      animState.phase = 'writing'
-      animState.showStream = totalChars > 0
-
-      if (remainingForDoc >= 3) {
-        // High backlog: fast smooth reveal (~450ms) so user never feels stuck waiting
-        const fastSteps = Math.min(16, Math.max(8, totalChars))
-        for (let s = 1; s <= fastSteps; s++) {
-          if (animState.runId !== myRunId || animState.skip) break
-          const count = Math.min(totalChars, Math.ceil((totalChars * s) / fastSteps))
-          animState.streamText = chars.slice(0, count).join('')
+      // For newly inserted blocks, pre-insert a subtle placeholder space or position right below previous block
+      if (unitType === 'insert_block' && !animState.skipAll) {
+        // Insert an empty anchor block into working blocks? Position cleanly on the block right above or target slot
+        const anchorIdx = Math.min(Math.max(0, unitIdx - 1), Math.max(0, blocks.length - 1))
+        if (unitIdx >= blocks.length) {
+          // Temporarily append a blank paragraph in Muya so the overlay sits right where the new block will live
+          blocks.splice(unitIdx, 0, ' ')
+          setMuyaMarkdownQuietly(blocks.join('\n\n') + '\n')
           await nextTick()
-          if (streamPreviewEl.value) {
-            const neededH = streamPreviewEl.value.offsetHeight + 8
-            if (neededH > animState.boxHeight) animState.boxHeight = neededH
+        } else {
+          blocks.splice(unitIdx, 0, ' ')
+          setMuyaMarkdownQuietly(blocks.join('\n\n') + '\n')
+          await nextTick()
+        }
+        void anchorIdx
+      }
+
+      if (!animState.skipAll) {
+        animState.activeBlockIndex = unitIdx
+        animState.phase = 'lock'
+        animState.progress = 0
+        animState.streamText = ''
+        animState.showStream = false
+        animState.badge =
+          animState.batchTotal > 1 ? `${animState.batchCurrent}/${animState.batchTotal}` : ''
+        positionOverlayOnBlock(unitIdx, op.label, `定位第 ${unitIdx + 1} 段`, true)
+        await sleep(remainingUnits >= 3 ? 160 : 320)
+        while (animState.paused && animState.runId === myRunId) await sleep(80)
+        if (animState.runId !== myRunId) return
+      }
+
+      if ((unitType === 'replace_block' || unitType === 'insert_block') && !animState.skip) {
+        const chars = Array.from(unitMd)
+        const totalChars = chars.length
+
+        animState.phase = 'writing'
+        animState.showStream = totalChars > 0
+
+        if (remainingUnits >= 3) {
+          const fastSteps = Math.min(14, Math.max(6, totalChars))
+          for (let s = 1; s <= fastSteps; s++) {
+            if (animState.runId !== myRunId || animState.skip) break
+            const count = Math.min(totalChars, Math.ceil((totalChars * s) / fastSteps))
+            animState.streamText = chars.slice(0, count).join('')
+            await nextTick()
+            if (streamPreviewEl.value) {
+              const neededH = streamPreviewEl.value.offsetHeight + 8
+              if (neededH > animState.boxHeight) animState.boxHeight = neededH
+            }
+            await sleep(24)
           }
-          await sleep(28)
+        } else {
+          // Human-readable real typing cadence (~15 chars/sec default, ~24 chars/sec with slight backlog)
+          const baseMsPerChar = remainingUnits >= 1 ? 42 : 62
+          const maxDurationMs = remainingUnits >= 1 ? 2600 : 4500
+          const charsPerTick = Math.max(1, Math.ceil((totalChars * baseMsPerChar) / maxDurationMs))
+          const tickDelay = Math.max(
+            26,
+            Math.min(
+              baseMsPerChar,
+              Math.round(maxDurationMs / Math.max(1, totalChars / charsPerTick))
+            )
+          )
+
+          for (let i = charsPerTick; i <= totalChars + charsPerTick - 1; i += charsPerTick) {
+            if (animState.runId !== myRunId || animState.skip) break
+            while (animState.paused && animState.runId === myRunId) await sleep(80)
+            const count = Math.min(totalChars, i)
+            animState.streamText = chars.slice(0, count).join('')
+            await nextTick()
+            if (streamPreviewEl.value) {
+              const neededH = streamPreviewEl.value.offsetHeight + 8
+              if (neededH > animState.boxHeight) animState.boxHeight = neededH
+            }
+            const lastChar = chars[count - 1] || ''
+            const extraPause = charsPerTick === 1 && PUNCT_PAUSE_RE.test(lastChar) ? 95 : 0
+            await sleep(tickDelay + extraPause)
+          }
+        }
+      } else if (unitType === 'delete_block' && !animState.skip) {
+        animState.phase = 'writing'
+        await sleep(340)
+      }
+
+      if (animState.runId !== myRunId) return
+
+      animState.showStream = false
+      animState.streamText = ''
+
+      // Commit THIS single unit block immediately to Muya so formatted Markdown renders progressively!
+      if (unitType === 'delete_block') {
+        blocks.splice(unitIdx, 1)
+      } else if (unitType === 'insert_block') {
+        if (!animState.skipAll && blocks[unitIdx] === ' ') {
+          blocks[unitIdx] = unitMd
+        } else {
+          blocks.splice(unitIdx, 0, unitMd)
         }
       } else {
-        // Human-readable real typing cadence (~15 chars/sec default, ~24 chars/sec with slight backlog)
-        const baseMsPerChar = remainingForDoc >= 1 ? 42 : 62
-        // Cap total duration at ~4.8s for very long paragraphs by emitting 2 chars/tick if needed
-        const maxDurationMs = remainingForDoc >= 1 ? 2800 : 4800
-        const charsPerTick = Math.max(1, Math.ceil((totalChars * baseMsPerChar) / maxDurationMs))
-        const tickDelay = Math.max(
-          26,
-          Math.min(baseMsPerChar, Math.round(maxDurationMs / Math.max(1, totalChars / charsPerTick)))
-        )
+        blocks[unitIdx] = unitMd
+      }
 
-        for (let i = charsPerTick; i <= totalChars + charsPerTick - 1; i += charsPerTick) {
-          if (animState.runId !== myRunId || animState.skip) break
-          while (animState.paused && animState.runId === myRunId) await sleep(80)
-          const count = Math.min(totalChars, i)
-          animState.streamText = chars.slice(0, count).join('')
-          await nextTick()
-          if (streamPreviewEl.value) {
-            const neededH = streamPreviewEl.value.offsetHeight + 8
-            if (neededH > animState.boxHeight) animState.boxHeight = neededH
-          }
-          const lastChar = chars[count - 1] || ''
-          const extraPause = charsPerTick === 1 && PUNCT_PAUSE_RE.test(lastChar) ? 100 : 0
-          await sleep(tickDelay + extraPause)
+      const isLastUnit = u === unitBlocks.length - 1
+      if (isLastUnit && op.resultingMarkdown !== undefined) {
+        store.markdown = op.resultingMarkdown
+        setMuyaMarkdownQuietly(op.resultingMarkdown)
+      } else {
+        const progressiveMd = blocks.join('\n\n') + '\n'
+        store.markdown = progressiveMd
+        setMuyaMarkdownQuietly(progressiveMd)
+        if (isLastUnit && op.resultingMarkdown === undefined) {
+          await store.onEditorMarkdownChanged(progressiveMd, true)
         }
       }
-    } else if (op.type === 'delete_block' && !animState.skip) {
-      animState.phase = 'writing'
-      await sleep(360)
-    }
 
-    if (animState.runId !== myRunId) return
+      await nextTick()
+      recordPendingChange(unitType, unitIdx, unitOldMd, unitMd, op.label)
 
-    animState.showStream = false
-    animState.streamText = ''
-
-    if (op.resultingMarkdown !== undefined) {
-      // Authoritative snapshot already persisted by Main Process DocMcpServer;
-      // NEVER write it back to main/disk here to avoid racing with subsequent MCP calls.
-      store.markdown = op.resultingMarkdown
-      setMuyaMarkdownQuietly(op.resultingMarkdown)
-    } else {
-      if (op.type === 'delete_block') {
-        blocks.splice(targetIdx, 1)
-      } else if (op.type === 'insert_block') {
-        blocks.splice(targetIdx, 0, op.newMarkdown)
-      } else {
-        blocks[targetIdx] = op.newMarkdown
+      if (!animState.skipAll) {
+        animState.phase = 'settled'
+        positionOverlayOnBlock(unitIdx, '已更新', '', false)
+        await sleep(remainingUnits > 0 ? 280 : 620)
       }
-      const nextMd = blocks.join('\n\n') + '\n'
-      setMuyaMarkdownQuietly(nextMd)
-      await store.onEditorMarkdownChanged(nextMd, true)
-    }
-
-    await nextTick()
-    recordPendingChange(op.type, targetIdx, prevBlockMarkdown, nextBlockMarkdown, op.label)
-
-    if (!animState.skipAll) {
-      animState.phase = 'settled'
-      positionOverlayOnBlock(targetIdx, '已更新', '', false)
-      await sleep(store.pendingDocOps.length > 0 ? 420 : 680)
     }
   }
 
@@ -1724,6 +1864,7 @@ function captureCurrentSelection(): boolean {
 
 function handleSelectionMouseUp() {
   captureCurrentSelection()
+  captureHumanCaretPosition()
 }
 
 function openCommentFromSelection() {
@@ -1817,6 +1958,7 @@ async function submitFloatComment() {
   if (!text) return
   const { blockIndex, quote } = floatComment
   floatComment.open = false
+  emit('comment-sent')
   await store.sendSelectionComment(blockIndex, quote, text)
 }
 
@@ -2150,6 +2292,9 @@ onUnmounted(() => {
 .muya-scroll.with-comment-rail {
   padding: 36px 316px 120px 44px;
 }
+.muya-scroll.with-comment-rail.compact-comment-rail {
+  padding: 36px 266px 120px 28px;
+}
 .margin-gutter {
   position: absolute;
   top: 0;
@@ -2160,6 +2305,10 @@ onUnmounted(() => {
 .margin-gutter.rail-mode {
   right: -292px;
   width: 264px;
+}
+.muya-scroll.compact-comment-rail .margin-gutter.rail-mode {
+  right: -248px;
+  width: 228px;
 }
 .margin-thread-card {
   position: absolute;

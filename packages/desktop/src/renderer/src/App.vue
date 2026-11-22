@@ -45,6 +45,7 @@
         @expand-sidebar="showSidebar = true"
         @close-doc="showDoc = false"
         @open-history="showHistory = true"
+        @comment-sent="handleCommentSent"
       />
     </template>
 
@@ -131,10 +132,17 @@ function startResize(e: MouseEvent) {
 
 function switchMode(next: 'files' | 'docs' | 'collab') {
   mode.value = next
-  if (next !== 'collab') {
-    showDoc.value = true
-  } else if (window.innerWidth < 1180) {
-    // Auto-collapse sidebar on narrow screens so chat + doc stay readable (P1-6)
+  showDoc.value = true
+  if (next === 'collab' && window.innerWidth < 1120) {
+    // Auto-collapse sidebar on narrow screens so chat + doc + comments stay readable
+    showSidebar.value = false
+  }
+}
+
+function handleCommentSent() {
+  mode.value = 'collab'
+  showDoc.value = true
+  if (window.innerWidth < 1120) {
     showSidebar.value = false
   }
 }
