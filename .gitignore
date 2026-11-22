@@ -7,3 +7,7 @@ packages/desktop/src-tauri/gen/
 .mark5/
 *.log
 .DS_Store
+
+scripts/.bench-ws/
+scripts/.bench-wv2/
+scripts/.mem-profile-history.json
