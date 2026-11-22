@@ -663,7 +663,7 @@ fn spawn_agy(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(crate::child_creation_flags());
+    cmd.creation_flags(CREATE_NO_WINDOW);
 
     let child = cmd
         .spawn()
@@ -717,7 +717,7 @@ fn spawn_claude(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(crate::child_creation_flags());
+    cmd.creation_flags(CREATE_NO_WINDOW);
 
     let child = cmd
         .spawn()
@@ -744,7 +744,7 @@ async fn spawn_codex(
     let (bin, mut cmd) = {
         let mut c = Command::new("cmd.exe");
         c.arg("/C").arg(&codex_bin);
-        c.creation_flags(crate::child_creation_flags());
+        c.creation_flags(CREATE_NO_WINDOW);
         (codex_bin.clone(), c)
     };
     #[cfg(not(target_os = "windows"))]
