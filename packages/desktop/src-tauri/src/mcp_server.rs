@@ -13,9 +13,6 @@ use tokio::sync::RwLock;
 
 use crate::workspace::{split_markdown_blocks, WorkspaceManager};
 
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 #[derive(Debug, Clone)]
 pub struct ActiveSessionContext {
     pub session_id: String,
@@ -64,7 +61,7 @@ impl DocMcpServer {
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.creation_flags(crate::child_creation_flags());
         }
         let _ = cmd.output();
     }
@@ -104,7 +101,7 @@ impl DocMcpServer {
         let mut cmd = Command::new(bin);
         cmd.args(args);
         #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(crate::child_creation_flags());
         match cmd.output().await {
             Ok(out) => out.status.success(),
             Err(_) => false,

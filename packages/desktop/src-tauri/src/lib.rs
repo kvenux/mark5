@@ -4,7 +4,7 @@ mod types;
 mod workspace;
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
@@ -454,7 +454,7 @@ async fn check_cli_status(
             c
         };
         #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000);
+        cmd.creation_flags(child_creation_flags());
         match cmd.output().await {
             Ok(res) if res.status.success() => {
                 let ver = String::from_utf8_lossy(&res.stdout)
@@ -503,7 +503,7 @@ async fn list_engine_models(
             let mut cmd = tokio::process::Command::new(&bin);
             cmd.arg("models");
             #[cfg(target_os = "windows")]
-            cmd.creation_flags(0x08000000);
+            cmd.creation_flags(child_creation_flags());
             let mut out = Vec::new();
             if let Ok(res) = cmd.output().await {
                 if res.status.success() {
@@ -643,8 +643,44 @@ async fn open_new_window(app: AppHandle, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+static HIDDEN_CONSOLE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Allocate a permanently hidden console for GUI builds on Windows so all child
+/// and grandchild CLI processes (agy / claude / codex / git / MCP helpers) inherit
+/// an invisible console instead of spawning visible flashing conhost.exe windows.
+#[cfg(target_os = "windows")]
+fn init_hidden_console() {
+    extern "system" {
+        fn GetConsoleWindow() -> *mut std::ffi::c_void;
+        fn AllocConsole() -> i32;
+        fn ShowWindow(hwnd: *mut std::ffi::c_void, n_cmd_show: i32) -> i32;
+    }
+    unsafe {
+        if GetConsoleWindow().is_null() && AllocConsole() != 0 {
+            let hwnd = GetConsoleWindow();
+            if !hwnd.is_null() {
+                ShowWindow(hwnd, 0); // SW_HIDE
+                HIDDEN_CONSOLE_ACTIVE.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn child_creation_flags() -> u32 {
+    if HIDDEN_CONSOLE_ACTIVE.load(Ordering::SeqCst) {
+        0 // Inherit our permanently hidden console so grandchildren never allocate a visible console
+    } else {
+        0x08000000 // CREATE_NO_WINDOW fallback when running from a dev terminal
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "windows")]
+    init_hidden_console();
+
     let workspace = WorkspaceManager::new();
 
     let app = tauri::Builder::default()
