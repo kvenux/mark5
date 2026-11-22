@@ -1,80 +1,76 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" width="880" height="420" role="img" aria-label="Mark 5 vs MarkText vs VS Code 体积与双开内存对比">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 490" width="880" height="490" role="img" aria-label="Mark 5 vs MarkText vs VS Code 性能对比">
   <defs>
     <style>
       .bg { fill: #FAF9F6; stroke: #E7E5E4; stroke-width: 1; }
       .title { font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #1C1917; }
-      .sub { font: 400 12px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #78716C; }
       .label { font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #44403C; }
-      .label-strong { font: 700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #1C1917; }
-      .val { font: 600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #57534E; }
-      .val-accent { font: 700 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #C2532B; }
-      .val-green { font: 700 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #15803D; }
-      .tag { font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #C2532B; }
-      .tag-green { font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #15803D; }
+      .label-m5 { font: 700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #14532D; }
+      .val { font: 600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #C2410C; }
+      .val-m5 { font: 700 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #15803D; }
       .divider { stroke: #E7E5E4; stroke-width: 1; }
       .track { fill: #F1EFEA; }
-      .bar-m5 { fill: #D9643A; }
-      .bar-bg { fill: #22A06B; }
-      .bar-other { fill: #D6D3D1; }
+      .bar-m5 { fill: #16A34A; }
+      .bar-other { fill: #F97316; }
     </style>
   </defs>
 
-  <rect x="0.5" y="0.5" width="879" height="419" rx="14" class="bg" />
+  <rect x="0.5" y="0.5" width="879" height="489" rx="14" class="bg" />
 
   <!-- Panel 1: 软件体积 -->
   <text x="32" y="38" class="title">软件体积</text>
-  <text x="104" y="38" class="sub">越小越轻，即下即用</text>
 
-  <!-- Mark 5: 7 MB / 1007 MB -> min visible 8px -->
-  <text x="32" y="74" class="label-strong">Mark 5</text>
-  <rect x="172" y="59" width="520" height="22" rx="6" class="track" />
-  <rect x="172" y="59" width="10" height="22" rx="5" class="bar-m5" />
-  <text x="192" y="75" class="val-accent">7 MB</text>
-  <text x="242" y="75" class="tag">小 55~145 倍</text>
+  <text x="32" y="74" class="label-m5">Mark 5</text>
+  <rect x="140" y="59" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="59" width="10" height="22" rx="5" class="bar-m5" />
+  <text x="162" y="75" class="val-m5">7 MB</text>
 
-  <!-- MarkText: 383 MB / 1007 MB * 520 = 198 -->
-  <text x="32" y="110" class="label">MarkText</text>
-  <rect x="172" y="95" width="520" height="22" rx="6" class="track" />
-  <rect x="172" y="95" width="198" height="22" rx="6" class="bar-other" />
-  <text x="380" y="111" class="val">383 MB</text>
+  <text x="32" y="108" class="label">MarkText</text>
+  <rect x="140" y="93" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="93" width="224" height="22" rx="6" class="bar-other" />
+  <text x="376" y="109" class="val">383 MB</text>
 
-  <!-- VS Code: 1007 MB -> 520 -->
-  <text x="32" y="146" class="label">VS Code</text>
-  <rect x="172" y="131" width="520" height="22" rx="6" class="track" />
-  <rect x="172" y="131" width="520" height="22" rx="6" class="bar-other" />
-  <text x="704" y="147" class="val">1,007 MB</text>
+  <text x="32" y="142" class="label">VS Code</text>
+  <rect x="140" y="127" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="127" width="590" height="22" rx="6" class="bar-other" />
+  <text x="742" y="143" class="val">1,007 MB</text>
 
-  <line x1="32" y1="178" x2="848" y2="178" class="divider" />
+  <line x1="32" y1="170" x2="848" y2="170" class="divider" />
 
-  <!-- Panel 2: 双窗口内存 -->
-  <text x="32" y="212" class="title">双开窗口内存</text>
-  <text x="134" y="212" class="sub">复杂长文（3 张 Mermaid 图 + 40 表格 + 40 代码块），越小越省</text>
+  <!-- Panel 2: 单开内存 -->
+  <text x="32" y="202" class="title">单开内存</text>
 
-  <!-- Mark 5 bg: 80 / 1375 * 520 = 30 -->
-  <text x="32" y="250" class="label-strong">Mark 5（挂后台）</text>
-  <rect x="172" y="235" width="520" height="22" rx="6" class="track" />
-  <rect x="172" y="235" width="30" height="22" rx="6" class="bar-bg" />
-  <text x="212" y="251" class="val-green">80 MB</text>
-  <text x="270" y="251" class="tag-green">最小化自动回收</text>
+  <text x="32" y="238" class="label-m5">Mark 5</text>
+  <rect x="140" y="223" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="223" width="241" height="22" rx="6" class="bar-m5" />
+  <text x="393" y="239" class="val-m5">156 MB</text>
 
-  <!-- Mark 5 active: 197 / 1375 * 520 = 75 -->
-  <text x="32" y="286" class="label-strong">Mark 5（双开）</text>
-  <rect x="172" y="271" width="520" height="22" rx="6" class="track" />
-  <rect x="172" y="271" width="75" height="22" rx="6" class="bar-m5" />
-  <text x="257" y="287" class="val-accent">197 MB</text>
-  <text x="322" y="287" class="tag">多开 1 窗仅 +40 MB，比竞品单开还省</text>
+  <text x="32" y="272" class="label">MarkText</text>
+  <rect x="140" y="257" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="257" width="523" height="22" rx="6" class="bar-other" />
+  <text x="675" y="273" class="val">338 MB</text>
 
-  <!-- MarkText: 545 / 1375 * 520 = 206 -->
-  <text x="32" y="322" class="label">MarkText（双开）</text>
-  <rect x="172" y="307" width="520" height="22" rx="6" class="track" />
-  <rect x="172" y="307" width="206" height="22" rx="6" class="bar-other" />
-  <text x="388" y="323" class="val">545 MB</text>
+  <text x="32" y="306" class="label">VS Code</text>
+  <rect x="140" y="291" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="291" width="590" height="22" rx="6" class="bar-other" />
+  <text x="742" y="307" class="val">381 MB</text>
 
-  <!-- VS Code: 1375 -> 520 -->
-  <text x="32" y="358" class="label">VS Code（双开）</text>
-  <rect x="172" y="343" width="520" height="22" rx="6" class="track" />
-  <rect x="172" y="343" width="520" height="22" rx="6" class="bar-other" />
-  <text x="704" y="359" class="val">1,375 MB</text>
+  <line x1="32" y1="334" x2="848" y2="334" class="divider" />
 
-  <text x="32" y="398" class="sub">Windows 11 同机实测 · 整棵进程树真实独占物理内存（WorkingSetPrivate）</text>
+  <!-- Panel 3: 双开内存 -->
+  <text x="32" y="366" class="title">双开内存</text>
+
+  <text x="32" y="402" class="label-m5">Mark 5</text>
+  <rect x="140" y="387" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="387" width="85" height="22" rx="6" class="bar-m5" />
+  <text x="237" y="403" class="val-m5">197 MB</text>
+
+  <text x="32" y="436" class="label">MarkText</text>
+  <rect x="140" y="421" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="421" width="234" height="22" rx="6" class="bar-other" />
+  <text x="386" y="437" class="val">545 MB</text>
+
+  <text x="32" y="470" class="label">VS Code</text>
+  <rect x="140" y="455" width="590" height="22" rx="6" class="track" />
+  <rect x="140" y="455" width="590" height="22" rx="6" class="bar-other" />
+  <text x="742" y="471" class="val">1,375 MB</text>
 </svg>

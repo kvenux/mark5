@@ -6,25 +6,22 @@
 
 Typora 级暖白排版 + 划词批注与 AI 原地改稿，双开复杂长文不到 200 MB，挂在后台只占 80 MB。
 
-![体积](https://img.shields.io/badge/体积-7%20MB-C2532B?style=flat-square)
-![双开内存](https://img.shields.io/badge/双开内存-197%20MB-15803D?style=flat-square)
-![后台常驻](https://img.shields.io/badge/后台常驻-80%20MB-15803D?style=flat-square)
-![AI 协同](https://img.shields.io/badge/AI%20协同-Claude%20%7C%20Codex%20%7C%20AGY-1C1917?style=flat-square)
+**7 MB 体积** · **197 MB 双开** · **80 MB 后台** · **Claude Code / Codex / AGY**
 
 <br />
 
-<img src="docs/assets/preview-comment.png" alt="Mark 5 暖白排版与 Claude Docs 式划词批注" width="900" />
+<img src="docs/assets/preview-collab.png" alt="Mark 5 三栏对话协同与暖白排版界面" width="900" />
 
 </div>
 
 ## 极致轻量：双开比别人单开还省
 
 <p align="center">
-  <img src="docs/assets/benchmark.svg" alt="Mark 5 vs MarkText vs VS Code 体积与双开内存对比" width="880" />
+  <img src="docs/assets/benchmark.svg" alt="Mark 5 vs MarkText vs VS Code 性能对比" width="820" />
 </p>
 
 <p align="center">
-  多开一窗仅增 <strong>+40 MB</strong>，最小化 20 秒自动降至 <strong>80 MB</strong> · <a href="docs/BENCHMARKS.md">查看完整实测数据与复现脚本 →</a>
+  多开一窗仅增 <strong>+40 MB</strong>，最小化 20 秒自动降至 <strong>80 MB</strong> · <a href="docs/BENCHMARKS.md">查看完整实测数据 →</a>
 </p>
 
 ## 核心体验
@@ -42,5 +39,3 @@ pnpm run dev                  # 启动开发窗口
 pnpm run build                # 构建 Release（packages/desktop/src-tauri/target/release/mark5.exe）
 node scripts/mem-profile.mjs  # 一键复测内存基准
 ```
-
-<sub>基于 Tauri v2 + Rust + Vue 3 + Muya 构建。</sub>
