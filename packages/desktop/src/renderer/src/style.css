@@ -291,6 +291,12 @@ button.btn-primary:hover {
   caret-color: var(--accent);
 }
 
+/* Skip offscreen block layout & GPU rasterization on long complex Markdown docs */
+.muya-host .mu-container > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+
 .muya-host .mu-editor p,
 .muya-host .mu-editor li {
   color: var(--editor-color);

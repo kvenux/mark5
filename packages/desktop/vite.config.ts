@@ -9,6 +9,7 @@ function pruneHeavyAssetsPlugin(): Plugin {
   const STUB_VEGA = '\0stub:vega-embed'
   const STUB_KATEX = '\0stub:katex'
   const STUB_EMPTY_CSS = '\0stub:empty-css'
+  const STUB_EXPORT_FONTS = '\0stub:embedExportFonts'
 
   return {
     name: 'mark5-prune-heavy-assets',
@@ -16,6 +17,9 @@ function pruneHeavyAssetsPlugin(): Plugin {
     resolveId(source) {
       if (source === 'vega-embed' || source === 'vega-lite' || source === 'vega') {
         return STUB_VEGA
+      }
+      if (/embedExportFonts/i.test(source)) {
+        return STUB_EXPORT_FONTS
       }
       if (source === 'katex' || source === 'katex/contrib/mhchem') {
         return STUB_KATEX
@@ -31,6 +35,9 @@ function pruneHeavyAssetsPlugin(): Plugin {
       }
       if (id === STUB_KATEX) {
         return `export function render(expr, el) { if (el) el.textContent = String(expr || ''); }\nexport function renderToString(expr) { return String(expr || ''); }\nexport default { render, renderToString };\n`
+      }
+      if (id === STUB_EXPORT_FONTS) {
+        return `export function embedExportFonts(css) { return css || ''; }\nexport default embedExportFonts;\n`
       }
       if (id === STUB_EMPTY_CSS) {
         return ''

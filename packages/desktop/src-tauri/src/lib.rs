@@ -630,16 +630,103 @@ async fn list_engine_models(
     }
 }
 
+const WV2_LEAN_ARGS: &str = "--disable-gpu --js-flags=--optimize-for-size --disable-features=BackForwardCache,Translate,MediaRouter,OptimizationHints,msWebOOUI,msPdfOOUI --disable-background-networking --disable-component-update --disable-extensions --disable-sync --disable-default-apps --no-pings --disable-speech-api --renderer-process-limit=1";
+
+#[cfg(target_os = "windows")]
+fn set_webview_memory_level(win: &tauri::WebviewWindow, low: bool) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+    };
+    use windows_core::Interface;
+
+    let _ = win.with_webview(move |wv| unsafe {
+        if let Ok(core) = wv.controller().CoreWebView2() {
+            if let Ok(core19) = core.cast::<ICoreWebView2_19>() {
+                let level = if low {
+                    COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+                } else {
+                    COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+                };
+                let _ = core19.SetMemoryUsageTargetLevel(level);
+            }
+        }
+    });
+}
+
+fn attach_background_memory_trim(win: &tauri::WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::sync::atomic::AtomicU64;
+        use std::sync::OnceLock;
+
+        static GLOBAL_FOCUS_GEN: OnceLock<AtomicU64> = OnceLock::new();
+        let gen = GLOBAL_FOCUS_GEN.get_or_init(|| AtomicU64::new(0));
+        let delay_secs: u64 = std::env::var("MARK5_LOW_MEM_DELAY_SECS")
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(20);
+        let app_handle = win.app_handle().clone();
+        win.on_window_event(move |ev| {
+            let should_check = match ev {
+                tauri::WindowEvent::Focused(true) => {
+                    gen.fetch_add(1, Ordering::SeqCst);
+                    for w in app_handle.webview_windows().values() {
+                        set_webview_memory_level(w, false);
+                    }
+                    false
+                }
+                tauri::WindowEvent::Focused(false) | tauri::WindowEvent::Resized(_) => true,
+                _ => false,
+            };
+            if should_check {
+                let any_active = app_handle
+                    .webview_windows()
+                    .values()
+                    .any(|w| w.is_focused().unwrap_or(false) && !w.is_minimized().unwrap_or(false));
+                if any_active {
+                    return;
+                }
+                let seq = gen.fetch_add(1, Ordering::SeqCst) + 1;
+                let app_c = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+                    let current_gen = GLOBAL_FOCUS_GEN
+                        .get()
+                        .map(|g| g.load(Ordering::SeqCst))
+                        .unwrap_or(0);
+                    if current_gen != seq {
+                        return;
+                    }
+                    let windows = app_c.webview_windows();
+                    let still_active = windows
+                        .values()
+                        .any(|w| w.is_focused().unwrap_or(false) && !w.is_minimized().unwrap_or(false));
+                    if !still_active {
+                        for w in windows.values() {
+                            set_webview_memory_level(w, true);
+                        }
+                    }
+                });
+            }
+        });
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = win;
+}
+
 #[tauri::command]
 async fn open_new_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let idx = state.win_counter.fetch_add(1, Ordering::SeqCst) + 1;
     let label = format!("mark5-win-{idx}");
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
+    let win = WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
         .title("Mark 5")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1024.0, 680.0)
+        .additional_browser_args(WV2_LEAN_ARGS)
         .build()
         .map_err(|e| format!("open_new_window failed: {e}"))?;
+    attach_background_memory_trim(&win);
     Ok(())
 }
 
@@ -668,6 +755,32 @@ pub fn run() {
                 agy,
                 win_counter: AtomicUsize::new(1),
             });
+
+            if let Some(main_win) = app.get_webview_window("main") {
+                attach_background_memory_trim(&main_win);
+            }
+
+            // Optional profiling harness hook: spawn N in-app windows deterministically
+            if let Ok(n_str) = std::env::var("MARK5_BENCH_WINDOWS") {
+                if let Ok(n) = n_str.trim().parse::<usize>() {
+                    for idx in 2..=n.min(6) {
+                        let label = format!("mark5-win-{idx}");
+                        if let Ok(w) = WebviewWindowBuilder::new(
+                            app,
+                            label,
+                            WebviewUrl::App("index.html".into()),
+                        )
+                        .title("Mark 5")
+                        .inner_size(1440.0, 900.0)
+                        .min_inner_size(1024.0, 680.0)
+                        .additional_browser_args(WV2_LEAN_ARGS)
+                        .build()
+                        {
+                            attach_background_memory_trim(&w);
+                        }
+                    }
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
