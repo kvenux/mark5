@@ -35,6 +35,25 @@ export function getImageInfo(image: HTMLElement): IImageInfo {
     };
 }
 
+function resolveLocalImageUrl(localPath: string, isEncodedForUrl = false): string {
+    const hostResolver =
+        typeof window !== 'undefined'
+            ? (window as unknown as { __MARK5_RESOLVE_LOCAL_SRC__?: (p: string) => string })
+                  .__MARK5_RESOLVE_LOCAL_SRC__
+            : undefined;
+    if (typeof hostResolver === 'function') {
+        let rawPath = localPath;
+        try {
+            rawPath = decodeURIComponent(rawPath);
+        }
+        catch {
+            // keep original path if percent-encoding is partial
+        }
+        return hostResolver(rawPath);
+    }
+    return localPathToFileUrl(isEncodedForUrl ? localPath : encodeDirnameForUrl(localPath));
+}
+
 export function getImageSrc(src: string) {
     const imageExtension = IMAGE_EXT_REG.test(src);
     const isFileUrl = /^file:\/\//i.test(src);
@@ -44,7 +63,14 @@ export function getImageSrc(src: string) {
         // Resolve relative paths against the host document directory; retain relative form when unavailable.
         const baseUrl
             = typeof window !== 'undefined' ? window.DIRNAME : undefined;
-        if (isUrl) {
+        if (isFileUrl) {
+            const stripped = src.replace(/^file:\/\/\/([a-z]:\/)/i, '$1').replace(/^file:\/\//i, '');
+            return {
+                isUnknownType: false,
+                src: resolveLocalImageUrl(stripped, true),
+            };
+        }
+        else if (isUrl) {
             return {
                 isUnknownType: false,
                 src,
@@ -53,13 +79,13 @@ export function getImageSrc(src: string) {
         else if (!isAbsoluteLocal && baseUrl) {
             return {
                 isUnknownType: false,
-                src: localPathToFileUrl(resolveRelativePath(encodeDirnameForUrl(baseUrl), src)),
+                src: resolveLocalImageUrl(resolveRelativePath(encodeDirnameForUrl(baseUrl), src), true),
             };
         }
         else {
             return {
                 isUnknownType: false,
-                src: localPathToFileUrl(src),
+                src: resolveLocalImageUrl(src, true),
             };
         }
     }

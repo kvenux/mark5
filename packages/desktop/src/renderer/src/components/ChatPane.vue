@@ -159,6 +159,13 @@
                     {{ t.durationSec.toFixed(1) }}s
                   </span>
                 </div>
+                <div
+                  v-if="m.streaming && !m.tools.some((t) => t.state === 'running') && !(m.text && m.text.trim())"
+                  class="tool-item"
+                >
+                  <span class="tool-state running">●</span>
+                  <span class="tool-label">{{ store.agentPhase || '正在思考下一步...' }}</span>
+                </div>
               </div>
             </div>
 
@@ -675,7 +682,7 @@ function toggleTrace(msgId: string) {
 
 function traceDotState(m: ChatMessage): string {
   const list = m.tools || []
-  if (m.streaming && list.some((t) => t.state === 'running')) return 'running'
+  if (m.streaming) return 'running'
   if (list.some((t) => t.state === 'error')) return 'error'
   return 'done'
 }
@@ -688,6 +695,7 @@ function summarizeTools(m: ChatMessage, expanded: boolean): string {
   // Concise count-based summary when expanded to avoid repeating the first tool item (P2-1)
   if (expanded) {
     if (runningIdx >= 0) return `执行中 · 第 ${runningIdx + 1} / ${list.length} 步`
+    if (m.streaming) return `思考中 · 已完成 ${list.length} 步`
     if (failed > 0) return `执行了 ${list.length} 步操作（${failed} 步失败）`
     return `共执行 ${list.length} 步操作`
   }
@@ -696,6 +704,7 @@ function summarizeTools(m: ChatMessage, expanded: boolean): string {
     const running = list[runningIdx]
     return `正在${running.detail || running.name}`
   }
+  if (m.streaming) return `思考中（已完成 ${list.length} 步）`
   if (failed > 0) return `执行了 ${list.length} 步操作（${failed} 步失败）`
   const last = list[list.length - 1]
   return last?.detail ? `${last.detail}（共 ${list.length} 步）` : `已完成 ${list.length} 步操作`
@@ -1232,6 +1241,7 @@ watch(
 }
 .tool-state.running {
   color: var(--accent);
+  animation: phasePulse 1s ease-in-out infinite;
 }
 .tool-state.error {
   color: #dc2626;

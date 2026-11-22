@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 use tokio::fs;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
@@ -118,16 +119,25 @@ impl WorkspaceManager {
                                 name,
                                 rel_path,
                                 is_dir: true,
+                                updated_at: None,
                                 children: Some(children),
                             });
                         }
                     } else {
                         let lower = name.to_lowercase();
                         if lower.ends_with(".md") || lower.ends_with(".markdown") {
+                            let updated_at = entry
+                                .metadata()
+                                .await
+                                .ok()
+                                .and_then(|m| m.modified().ok())
+                                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as i64);
                             result.push(FileEntry {
                                 name,
                                 rel_path,
                                 is_dir: false,
+                                updated_at,
                                 children: None,
                             });
                         }
@@ -204,13 +214,22 @@ impl WorkspaceManager {
                             name,
                             rel_path,
                             is_dir: true,
+                            updated_at: None,
                             children: Some(children),
                         });
                     } else {
+                        let updated_at = entry
+                            .metadata()
+                            .await
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as i64);
                         result.push(FileEntry {
                             name,
                             rel_path,
                             is_dir: false,
+                            updated_at,
                             children: None,
                         });
                     }

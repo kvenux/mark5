@@ -291,12 +291,6 @@ button.btn-primary:hover {
   caret-color: var(--accent);
 }
 
-/* Skip offscreen block layout & GPU rasterization on long complex Markdown docs */
-.muya-host .mu-container > * {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 64px;
-}
-
 .muya-host .mu-editor p,
 .muya-host .mu-editor li {
   color: var(--editor-color);
@@ -470,34 +464,6 @@ button.btn-primary:hover {
   padding-left: 16px;
   border-left: 2.5px solid var(--blockquote-border-color);
   color: var(--blockquote-text-color);
-}
-
-/* Human Presence Caret (clean blinking caret in the doc when focus moves into ChatPane) */
-.human-presence-caret {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 2px;
-  border-radius: 1px;
-  background: #2563eb;
-  pointer-events: none;
-  z-index: 22;
-  animation: mcHumanCaretBlink 1.05s ease-in-out infinite;
-}
-
-[data-theme='dark'] .human-presence-caret {
-  background: #60a5fa;
-}
-
-@keyframes mcHumanCaretBlink {
-  0%,
-  55% {
-    opacity: 1;
-  }
-  75%,
-  100% {
-    opacity: 0.25;
-  }
 }
 
 /* Crisp IDE Vertical I-Beam Caret */

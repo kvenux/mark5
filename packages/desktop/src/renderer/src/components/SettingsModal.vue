@@ -19,11 +19,19 @@
           <Cpu :size="15" :stroke-width="1.75" />
           <span>AI 后端与模型</span>
         </button>
+        <button
+          class="snav-item"
+          :class="{ active: tab === 'writing' }"
+          @click="tab = 'writing'"
+        >
+          <PenLine :size="15" :stroke-width="1.75" />
+          <span>个人写作偏好</span>
+        </button>
       </aside>
 
       <section class="settings-content">
         <header class="settings-head">
-          <span>{{ tab === 'appearance' ? '外观与主题' : 'AI 后端与模型' }}</span>
+          <span>{{ tabTitle }}</span>
           <button class="icon-close" title="关闭 (Esc)" @click="$emit('close')">
             <X :size="16" :stroke-width="1.75" />
           </button>
@@ -83,7 +91,7 @@
           </template>
 
           <!-- Backend & Models Tab -->
-          <template v-else>
+          <template v-else-if="tab === 'backend'">
             <div class="s-group">
               <div class="s-row-between">
                 <div class="s-label" style="margin: 0">默认无头引擎</div>
@@ -149,6 +157,41 @@
               />
             </div>
           </template>
+
+          <!-- Writing & Prompts Tab -->
+          <template v-else>
+            <div class="s-group">
+              <div class="s-row-between">
+                <div>
+                  <div class="s-label">个人写作偏好</div>
+                  <div class="s-sub-label" style="margin-top: 2px">
+                    对 AGY、Claude Code、Codex 三个写作 Agent 统一生效，可随时修改或停用
+                  </div>
+                </div>
+                <div class="writing-actions">
+                  <button
+                    class="btn-mini"
+                    :class="{ 'btn-mini-active': store.settings.enablePersonalWritingPrompt }"
+                    @click="togglePersonalPrompt"
+                  >
+                    {{ store.settings.enablePersonalWritingPrompt ? '已启用' : '已停用' }}
+                  </button>
+                  <button class="btn-mini" @click="resetPersonalPrompt">
+                    <RotateCcw :size="12" :stroke-width="1.8" />
+                    <span>恢复默认</span>
+                  </button>
+                </div>
+              </div>
+              <textarea
+                class="s-textarea"
+                :class="{ dimmed: !store.settings.enablePersonalWritingPrompt }"
+                :value="store.settings.personalWritingPrompt"
+                rows="14"
+                placeholder="输入你的个人写作风格、结构模板、用词偏好..."
+                @input="onPersonalPromptInput"
+              />
+            </div>
+          </template>
         </div>
       </section>
     </div>
@@ -156,14 +199,15 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import { Cpu, Palette, RefreshCw, X } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Cpu, Palette, PenLine, RefreshCw, RotateCcw, X } from 'lucide-vue-next'
 import type { AgentEngine, AppTheme, CliStatusItem } from '@shared/types'
+import { DEFAULT_PERSONAL_WRITING_PROMPT } from '@shared/writingPrompts'
 import { useAppStore } from '@/stores/appStore'
 
 const props = withDefaults(
   defineProps<{
-    initialTab?: 'appearance' | 'backend'
+    initialTab?: 'appearance' | 'backend' | 'writing'
   }>(),
   {
     initialTab: 'appearance'
@@ -175,7 +219,12 @@ const emit = defineEmits<{
 }>()
 
 const store = useAppStore()
-const tab = ref<'appearance' | 'backend'>(props.initialTab)
+const tab = ref<'appearance' | 'backend' | 'writing'>(props.initialTab)
+const tabTitle = computed(() => {
+  if (tab.value === 'backend') return 'AI 后端与模型'
+  if (tab.value === 'writing') return '个人写作偏好'
+  return '外观与主题'
+})
 const checkingCli = ref(false)
 const cliStatuses = ref<CliStatusItem[]>([])
 
@@ -245,6 +294,26 @@ function onPathInput(eng: AgentEngine, e: Event) {
   store.updateSettings({
     cliPaths: { ...store.settings.cliPaths, [eng]: (e.target as HTMLInputElement).value }
   })
+}
+
+function onPersonalPromptInput(e: Event) {
+  store.updateSettings({
+    personalWritingPrompt: (e.target as HTMLTextAreaElement).value
+  })
+}
+
+function togglePersonalPrompt() {
+  store.updateSettings({
+    enablePersonalWritingPrompt: !store.settings.enablePersonalWritingPrompt
+  })
+}
+
+function resetPersonalPrompt() {
+  store.updateSettings({
+    enablePersonalWritingPrompt: true,
+    personalWritingPrompt: DEFAULT_PERSONAL_WRITING_PROMPT
+  })
+  store.showToast('已恢复默认个人写作偏好')
 }
 
 async function runCheckCli() {
@@ -507,6 +576,38 @@ onUnmounted(() => {
 }
 .btn-mini:hover:not(:disabled) {
   background: var(--bg-subtle);
+}
+.btn-mini-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+.writing-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.s-textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--bg-canvas);
+  color: var(--ink-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.65;
+  resize: vertical;
+  outline: none;
+}
+.s-textarea:focus {
+  border-color: var(--accent);
+}
+.s-textarea.dimmed {
+  opacity: 0.55;
 }
 .cli-status-list {
   display: flex;

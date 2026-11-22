@@ -980,6 +980,17 @@ fn format_readable_tool(name: &str, detail: &str) -> String {
     name.to_string()
 }
 
+const SYSTEM_WRITING_RULES: &str = r#"## 通用写作准则（软件默认）
+- 先定主张再动笔：未明确一句话核心观点和主线前，不要直接生成大段成稿；拒绝空洞套话与 AI 预制菜。
+- 主线唯一：全文围绕一条主线推进，章标题连起来构成清晰的逻辑链；无关材料再好也删。
+- 去除典型 AI 味：
+  - 禁用廉价句式与过渡词：不是……而是……、从……到……、与其说……不如说……、不能简单概括成……、值得一提的是、在当今时代背景下，以及生硬凑数的首先、其次、最后。
+  - 不做稻草人论证与防御性写作：不虚构“很多人以为……其实不然”式的假想敌；只在事实或材料中真实存在对立时才做对比，不脸谱化任何一方；只在边界条件真正改变结论时才加限定，且紧挨对应论断写，不反复插免责声明。
+  - 拒绝表演与凑数：删掉硬凑的金句、强行拔高升华、无意义的三段排比和情绪煽动。
+- 只讲透一次：同一观点只在最合适的位置讲透，其余处最多一句呼应；删除紧跟在后的同义复述句。
+- 去掉路标句：不用本章将讲……、下面我们来看……、综上所述，让标题承担导航。
+- 句式、比喻与阅读摩擦：以短句和中句为主，仅在因果链需要连贯时用长句；比喻只用来解释机制，不好懂或纯装饰的直接删；复用前文概念时当场一句话点明，不让读者回翻；链接包在文字中，不裸贴 URL。"#;
+
 fn build_prompt(req: &SendAgentTurnPayload, mcp_name: &str) -> String {
     let mut parts = vec![
         format!("你是 Mark 5 本地 Markdown 协同写作助手。你的本地文档 MCP 工具集名称为 `{mcp_name}`。"),
@@ -989,6 +1000,13 @@ fn build_prompt(req: &SendAgentTurnPayload, mcp_name: &str) -> String {
         parts.push(format!("当前打开文档：{doc}"));
     }
     parts.push("协作规范：创建新文档用 doc_create_skeleton；修改段落前先用 doc_read_blocks 获取最新内容再用 doc_replace_block / doc_insert_block；批注问题用 doc_reply_comment 回复。".to_string());
+    parts.push(SYSTEM_WRITING_RULES.to_string());
+    if let Some(ref personal) = req.personal_writing_prompt {
+        let trimmed = personal.trim();
+        if !trimmed.is_empty() {
+            parts.push(format!("## 个人写作偏好（用户设定）\n{trimmed}"));
+        }
+    }
 
     if let Some(ref md) = req.current_markdown {
         if !md.trim().is_empty() {

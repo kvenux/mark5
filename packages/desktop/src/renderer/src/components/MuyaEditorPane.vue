@@ -83,23 +83,11 @@
       }"
       @mouseup="handleSelectionMouseUp"
       @mousedown="handleEditorMouseDown"
-      @keyup="captureHumanCaretPosition"
-      @focusin="onEditorFocusIn"
-      @focusout="onEditorFocusOut"
       @click="activeMarginThreadId = null"
       @wheel.passive="onUserScroll"
       @touchstart.passive="onUserScroll"
     >
       <div ref="hostWrapEl" class="muya-host">
-        <!-- Human Presence Caret (clean blinking caret in the doc when focus moves to ChatPane) -->
-        <div
-          v-if="humanCaret.hasPos && !humanCaret.inEditor && !animState.running"
-          class="human-presence-caret"
-          :style="{
-            transform: `translate(${humanCaret.x}px, ${humanCaret.y}px)`,
-            height: humanCaret.height + 'px'
-          }"
-        />
         <!-- Persistent Left-Gutter Change Bars (VS Code Git-diff style, click to review diff) -->
         <div
           v-for="bar in changedBarRects"
@@ -654,58 +642,6 @@ const showCommentRail = computed(
 const isCompactCommentRail = computed(
   () => scrollPaneWidth.value >= 560 && scrollPaneWidth.value < 860
 )
-
-// Human Focus Presence Caret (keeps blinking at user's last doc caret when focus moves to ChatPane)
-const humanCaret = reactive({
-  hasPos: false,
-  inEditor: false,
-  x: 0,
-  y: 0,
-  height: 20,
-  blockIndex: -1
-})
-
-function captureHumanCaretPosition() {
-  const wrap = hostWrapEl.value
-  const root = muyaContainerEl.value?.querySelector('.mu-container')
-  if (!wrap || !root) return
-  const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) return
-  const range = sel.getRangeAt(0)
-  if (!root.contains(range.startContainer)) return
-
-  const wRect = wrap.getBoundingClientRect()
-  const caretRange = range.cloneRange()
-  caretRange.collapse(false)
-  const rects = caretRange.getClientRects()
-  let rect = rects.length > 0 ? rects[rects.length - 1] : caretRange.getBoundingClientRect()
-
-  if (!rect || (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.left === 0)) {
-    const elNode =
-      range.endContainer.nodeType === Node.ELEMENT_NODE
-        ? (range.endContainer as HTMLElement)
-        : range.endContainer.parentElement
-    if (elNode) rect = elNode.getBoundingClientRect()
-  }
-  if (!rect || (rect.top === 0 && rect.left === 0)) return
-
-  humanCaret.x = Math.max(4, Math.round(rect.left - wRect.left))
-  humanCaret.y = Math.max(4, Math.round(rect.top - wRect.top))
-  humanCaret.height = Math.min(34, Math.max(17, Math.round(rect.height || 20)))
-  humanCaret.hasPos = true
-}
-
-function onEditorFocusIn() {
-  humanCaret.inEditor = true
-  captureHumanCaretPosition()
-}
-
-function onEditorFocusOut(e: FocusEvent) {
-  const next = e.relatedTarget as Node | null
-  if (next && scrollEl.value?.contains(next)) return
-  captureHumanCaretPosition()
-  humanCaret.inEditor = false
-}
 
 const marginThreadGroups = computed(() => {
   void marginTick.value
@@ -1267,8 +1203,6 @@ watch(
   () => store.activeDocRelPath,
   () => {
     clearChangedReview()
-    humanCaret.hasPos = false
-    humanCaret.inEditor = false
   }
 )
 
@@ -1442,6 +1376,8 @@ watch(
 )
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const waitForLayoutFrame = () =>
+  new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 
 function splitTopBlocks(md: string): string[] {
   const lines = md.replace(/\r\n/g, '\n').split('\n')
@@ -1513,6 +1449,47 @@ function positionOverlayOnBlock(
   animState.boxWidth = tRect.width + 20
   animState.boxHeight = Math.max(36, tRect.height + 12)
   // Dock cursor pill neatly on the top-right edge of the highlighted block so it never overlaps headings above
+  animState.cursorX = Math.max(animState.boxLeft + 8, animState.boxLeft + animState.boxWidth - 246)
+  animState.cursorY = Math.max(0, animState.boxTop - 26)
+  animState.label = label
+  animState.detail = detail
+  animState.visible = true
+}
+
+function positionOverlayForInsert(
+  insertIndex: number,
+  label: string,
+  detail: string,
+  shouldScroll = true
+) {
+  const wrap = hostWrapEl.value
+  const els = getTopBlockElements()
+  if (!wrap) return
+
+  const wRect = wrap.getBoundingClientRect()
+  if (els.length === 0) {
+    animState.boxTop = 8
+    animState.boxLeft = 2
+    animState.boxWidth = Math.max(240, wrap.clientWidth - 4)
+    animState.boxHeight = 44
+  } else if (insertIndex <= 0) {
+    const first = els[0]
+    if (shouldScroll) scrollBlockToGoldenZone(first)
+    const fRect = first.getBoundingClientRect()
+    animState.boxTop = Math.max(0, fRect.top - wRect.top - 6)
+    animState.boxLeft = Math.max(0, fRect.left - wRect.left - 10)
+    animState.boxWidth = fRect.width + 20
+    animState.boxHeight = 44
+  } else {
+    const prev = els[Math.min(insertIndex - 1, els.length - 1)]
+    if (shouldScroll) scrollBlockToGoldenZone(prev)
+    const pRect = prev.getBoundingClientRect()
+    animState.boxTop = Math.max(0, pRect.bottom - wRect.top + 8)
+    animState.boxLeft = Math.max(0, pRect.left - wRect.left - 10)
+    animState.boxWidth = pRect.width + 20
+    animState.boxHeight = 44
+  }
+
   animState.cursorX = Math.max(animState.boxLeft + 8, animState.boxLeft + animState.boxWidth - 246)
   animState.cursorY = Math.max(0, animState.boxTop - 26)
   animState.label = label
@@ -1641,23 +1618,6 @@ async function drainOpQueue() {
 
       animState.skip = animState.skipAll
 
-      // For newly inserted blocks, pre-insert a subtle placeholder space or position right below previous block
-      if (unitType === 'insert_block' && !animState.skipAll) {
-        // Insert an empty anchor block into working blocks? Position cleanly on the block right above or target slot
-        const anchorIdx = Math.min(Math.max(0, unitIdx - 1), Math.max(0, blocks.length - 1))
-        if (unitIdx >= blocks.length) {
-          // Temporarily append a blank paragraph in Muya so the overlay sits right where the new block will live
-          blocks.splice(unitIdx, 0, ' ')
-          setMuyaMarkdownQuietly(blocks.join('\n\n') + '\n')
-          await nextTick()
-        } else {
-          blocks.splice(unitIdx, 0, ' ')
-          setMuyaMarkdownQuietly(blocks.join('\n\n') + '\n')
-          await nextTick()
-        }
-        void anchorIdx
-      }
-
       if (!animState.skipAll) {
         animState.activeBlockIndex = unitIdx
         animState.phase = 'lock'
@@ -1666,7 +1626,11 @@ async function drainOpQueue() {
         animState.showStream = false
         animState.badge =
           animState.batchTotal > 1 ? `${animState.batchCurrent}/${animState.batchTotal}` : ''
-        positionOverlayOnBlock(unitIdx, op.label, `定位第 ${unitIdx + 1} 段`, true)
+        if (unitType === 'insert_block') {
+          positionOverlayForInsert(unitIdx, op.label, `定位第 ${unitIdx + 1} 段`, true)
+        } else {
+          positionOverlayOnBlock(unitIdx, op.label, `定位第 ${unitIdx + 1} 段`, true)
+        }
         await sleep(remainingUnits >= 3 ? 160 : 320)
         while (animState.paused && animState.runId === myRunId) await sleep(80)
         if (animState.runId !== myRunId) return
@@ -1734,11 +1698,7 @@ async function drainOpQueue() {
       if (unitType === 'delete_block') {
         blocks.splice(unitIdx, 1)
       } else if (unitType === 'insert_block') {
-        if (!animState.skipAll && blocks[unitIdx] === ' ') {
-          blocks[unitIdx] = unitMd
-        } else {
-          blocks.splice(unitIdx, 0, unitMd)
-        }
+        blocks.splice(unitIdx, 0, unitMd)
       } else {
         blocks[unitIdx] = unitMd
       }
@@ -1757,7 +1717,9 @@ async function drainOpQueue() {
       }
 
       await nextTick()
+      await waitForLayoutFrame()
       recordPendingChange(unitType, unitIdx, unitOldMd, unitMd, op.label)
+      marginTick.value += 1
 
       if (!animState.skipAll) {
         animState.phase = 'settled'
@@ -1861,7 +1823,6 @@ function captureCurrentSelection(): boolean {
 
 function handleSelectionMouseUp() {
   captureCurrentSelection()
-  captureHumanCaretPosition()
 }
 
 function openCommentFromSelection() {

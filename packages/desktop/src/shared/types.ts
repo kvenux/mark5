@@ -8,6 +8,8 @@ export interface AppSettings {
   defaultEngine: AgentEngine
   models: Record<AgentEngine, string>
   cliPaths: Record<AgentEngine, string>
+  enablePersonalWritingPrompt: boolean
+  personalWritingPrompt: string
 }
 
 export interface CliStatusItem {
@@ -32,6 +34,7 @@ export interface FileEntry {
   name: string
   relPath: string
   isDir: boolean
+  updatedAt?: number
   children?: FileEntry[]
 }
 
@@ -222,6 +225,7 @@ export interface Mark5API {
     prompt: string
     model?: string
     cliPath?: string
+    personalWritingPrompt?: string
     docRelPath?: string
     currentMarkdown?: string
     threadContext?: {

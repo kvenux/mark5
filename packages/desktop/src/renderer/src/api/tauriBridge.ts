@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type {
   AgentDocOp,
@@ -15,6 +15,9 @@ import type {
 
 export function installTauriMark5Bridge(): void {
   if (typeof window === 'undefined' || window.mark5) return
+
+  ;(window as unknown as { __MARK5_RESOLVE_LOCAL_SRC__?: (p: string) => string }).__MARK5_RESOLVE_LOCAL_SRC__ =
+    (localPath: string) => convertFileSrc(localPath)
 
   const api: Mark5API = {
     getDefaultWorkspace: () => invoke<WorkspaceInfo | null>('get_default_workspace'),

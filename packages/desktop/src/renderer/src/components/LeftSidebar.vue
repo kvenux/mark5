@@ -1,5 +1,5 @@
 <template>
-  <aside class="left-sidebar">
+  <aside class="left-sidebar" :style="width ? { width: width + 'px' } : undefined">
     <!-- Brand Header -->
     <div class="sidebar-top">
       <button class="brand-word" title="返回项目欢迎页" @click="store.closeWorkspace()">Mark 5</button>
@@ -247,7 +247,7 @@
       </template>
 
       <template v-else>
-        <div class="section-caption">Markdown 文档</div>
+        <div class="section-caption">最近修改</div>
         <div
           v-for="f in filteredMdFiles"
           :key="f.relPath"
@@ -267,15 +267,22 @@
             @keydown.esc.stop="cancelFileRename"
             @blur="commitFileRename"
           />
-          <span v-else class="item-title">{{ f.relPath }}</span>
-          <button
-            v-if="renamingFilePath !== f.relPath"
-            class="doc-more-dots"
-            title="更多操作"
-            @click.stop="openFileMenu(f, $event)"
-          >
-            ···
-          </button>
+          <div v-else class="doc-list-body">
+            <div class="doc-list-top">
+              <span class="item-title">{{ docDisplayName(f) }}</span>
+              <span v-if="f.updatedAt" class="doc-item-time">{{ formatTime(f.updatedAt) }}</span>
+              <button
+                class="doc-more-dots"
+                title="更多操作"
+                @click.stop="openFileMenu(f, $event)"
+              >
+                ···
+              </button>
+            </div>
+            <div v-if="docParentDir(f.relPath)" class="doc-list-dir">
+              {{ docParentDir(f.relPath) }}
+            </div>
+          </div>
         </div>
         <div v-if="!filteredMdFiles.length" class="empty-muted">当前目录暂无 Markdown 文档</div>
 
@@ -396,6 +403,7 @@ import FileTreeNode from './FileTreeNode.vue'
 
 defineProps<{
   mode: 'files' | 'docs' | 'collab'
+  width?: number
 }>()
 
 defineEmits<{
@@ -474,8 +482,23 @@ const flatMdFiles = computed(() => {
     }
   }
   walk(store.files)
+  out.sort((a, b) => {
+    const diff = (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+    if (diff !== 0) return diff
+    return a.relPath.localeCompare(b.relPath)
+  })
   return out
 })
+
+function docDisplayName(f: FileEntry): string {
+  const base = f.name || f.relPath.split('/').pop() || f.relPath
+  return base.replace(/\.(md|markdown)$/i, '') || base
+}
+
+function docParentDir(relPath: string): string {
+  const idx = relPath.lastIndexOf('/')
+  return idx > 0 ? relPath.slice(0, idx) : ''
+}
 
 const filteredMdFiles = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -1008,14 +1031,40 @@ onUnmounted(() => {
 }
 .doc-list-item {
   display: flex;
-  align-items: center;
-  gap: 7px;
+  align-items: flex-start;
+  gap: 8px;
   padding: 6px 6px 6px 10px;
   border-radius: 7px;
   font-size: 13px;
   color: var(--ink-body);
   cursor: pointer;
-  margin-bottom: 1px;
+  margin-bottom: 2px;
+}
+.doc-list-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.doc-list-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.doc-list-dir {
+  font-size: 11px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.doc-item-time {
+  font-size: 11px;
+  color: var(--ink-faint);
+  flex-shrink: 0;
 }
 .doc-more-dots {
   display: none;
@@ -1033,6 +1082,9 @@ onUnmounted(() => {
 .doc-list-item:hover .doc-more-dots {
   display: inline-flex;
 }
+.doc-list-item:hover .doc-item-time {
+  display: none;
+}
 .doc-more-dots:hover {
   color: var(--ink-primary);
 }
@@ -1048,6 +1100,7 @@ onUnmounted(() => {
 .doc-list-icon {
   flex-shrink: 0;
   color: var(--ink-muted);
+  margin-top: 2px;
 }
 .doc-list-item.active .doc-list-icon {
   color: var(--ink-primary);

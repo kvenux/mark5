@@ -108,7 +108,7 @@ defineEmits<{
   (e: 'cancel-rename'): void
 }>()
 
-const expanded = ref(props.depth < 1)
+const expanded = ref(false)
 const isOpen = computed(() => Boolean(props.forceOpen || expanded.value))
 const fileKind = computed<'md' | 'code' | 'other'>(() => {
   const n = props.entry.name.toLowerCase()

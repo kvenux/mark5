@@ -15,6 +15,8 @@ pub struct FileEntry {
     pub rel_path: String,
     pub is_dir: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<FileEntry>>,
 }
 
@@ -157,6 +159,8 @@ pub struct SendAgentTurnPayload {
     pub model: Option<String>,
     #[serde(default)]
     pub cli_path: Option<String>,
+    #[serde(default)]
+    pub personal_writing_prompt: Option<String>,
     #[serde(default)]
     pub doc_rel_path: Option<String>,
     #[serde(default)]

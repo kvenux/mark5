@@ -11,10 +11,20 @@
       <LeftSidebar
         v-if="showSidebar"
         :mode="mode"
+        :width="sidebarWidth"
         @update:mode="switchMode"
         @collapse="showSidebar = false"
         @new-session="handleNewSession"
         @open-settings="openSettings('appearance')"
+      />
+
+      <!-- Draggable Resizer for Left Sidebar -->
+      <div
+        v-if="showSidebar"
+        class="pane-resizer"
+        :class="{ dragging: isDraggingSidebar }"
+        title="拖动调节左侧栏宽度"
+        @mousedown="startSidebarResize"
       />
 
       <!-- Middle Chat Pane (only in 'collab' AI writing mode) -->
@@ -99,11 +109,37 @@ const showSidebar = ref(true)
 const showDoc = ref(true)
 const showHistory = ref(false)
 const showSettings = ref(false)
-const settingsTab = ref<'appearance' | 'backend'>('appearance')
+const settingsTab = ref<'appearance' | 'backend' | 'writing'>('appearance')
 
-function openSettings(tab: 'appearance' | 'backend') {
+function openSettings(tab: 'appearance' | 'backend' | 'writing') {
   settingsTab.value = tab
   showSettings.value = true
+}
+
+const savedSidebarWidth = Number(localStorage.getItem('mc_sidebar_width') || 244)
+const sidebarWidth = ref(
+  Number.isFinite(savedSidebarWidth) ? Math.min(460, Math.max(200, savedSidebarWidth)) : 244
+)
+const isDraggingSidebar = ref(false)
+
+function startSidebarResize(e: MouseEvent) {
+  e.preventDefault()
+  isDraggingSidebar.value = true
+  const startX = e.clientX
+  const startW = sidebarWidth.value
+
+  const onMove = (ev: MouseEvent) => {
+    const next = Math.min(460, Math.max(200, startW + (ev.clientX - startX)))
+    sidebarWidth.value = Math.round(next)
+  }
+  const onUp = () => {
+    isDraggingSidebar.value = false
+    localStorage.setItem('mc_sidebar_width', String(sidebarWidth.value))
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
 }
 
 const savedWidth = Number(localStorage.getItem('mc_chat_width') || 390)

@@ -14,13 +14,17 @@ import type {
   WorkspaceInfo
 } from '@shared/types'
 
+import { DEFAULT_PERSONAL_WRITING_PROMPT } from '@shared/writingPrompts'
+
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'warm',
   editorFontSize: 15,
   editorMaxWidth: 720,
   defaultEngine: 'agy',
   models: { agy: '', claude: '', codex: '' },
-  cliPaths: { agy: '', claude: '', codex: '' }
+  cliPaths: { agy: '', claude: '', codex: '' },
+  enablePersonalWritingPrompt: true,
+  personalWritingPrompt: DEFAULT_PERSONAL_WRITING_PROMPT
 }
 
 function loadSavedSettings(): AppSettings {
@@ -37,7 +41,15 @@ function loadSavedSettings(): AppSettings {
           ? parsed.defaultEngine
           : 'agy',
       models: { ...DEFAULT_SETTINGS.models, ...(parsed.models || {}) },
-      cliPaths: { ...DEFAULT_SETTINGS.cliPaths, ...(parsed.cliPaths || {}) }
+      cliPaths: { ...DEFAULT_SETTINGS.cliPaths, ...(parsed.cliPaths || {}) },
+      enablePersonalWritingPrompt:
+        typeof parsed.enablePersonalWritingPrompt === 'boolean'
+          ? parsed.enablePersonalWritingPrompt
+          : DEFAULT_SETTINGS.enablePersonalWritingPrompt,
+      personalWritingPrompt:
+        typeof parsed.personalWritingPrompt === 'string'
+          ? parsed.personalWritingPrompt
+          : DEFAULT_SETTINGS.personalWritingPrompt
     }
   } catch {
     return { ...DEFAULT_SETTINGS, models: { ...DEFAULT_SETTINGS.models }, cliPaths: { ...DEFAULT_SETTINGS.cliPaths } }
@@ -260,11 +272,26 @@ export const useAppStore = defineStore('app', () => {
     await switchWorkspace(ws)
   }
 
+  function syncWindowDirname(rootPath: string | null | undefined, docRelPath: string | null | undefined) {
+    if (typeof window === 'undefined') return
+    const win = window as unknown as { DIRNAME?: string }
+    if (!rootPath || !docRelPath) {
+      win.DIRNAME = undefined
+      return
+    }
+    const cleanRoot = rootPath.replace(/\\/g, '/').replace(/\/+$/, '')
+    const cleanRel = docRelPath.replace(/\\/g, '/').replace(/^\/+/, '')
+    const lastSlash = cleanRel.lastIndexOf('/')
+    const parentRel = lastSlash > 0 ? cleanRel.slice(0, lastSlash) : ''
+    win.DIRNAME = parentRel ? `${cleanRoot}/${parentRel}` : cleanRoot
+  }
+
   function clearEditorState() {
     openTabs.value = []
     pendingDocOps.value = []
     toc.value = []
     activeDocRelPath.value = null
+    syncWindowDirname(null, null)
     markdown.value = ''
     threads.value = []
     history.value = []
@@ -451,6 +478,7 @@ export const useAppStore = defineStore('app', () => {
     if (!openTabs.value.includes(relPath)) {
       openTabs.value.push(relPath)
     }
+    syncWindowDirname(activeWorkspace.value.rootPath, relPath)
     markdown.value = content
     threads.value = docThreads
     history.value = docHistory
@@ -645,12 +673,16 @@ export const useAppStore = defineStore('app', () => {
       const eng = sess.engine || 'agy'
       const activeModel = sess.model || settings.value.models[eng] || undefined
       const activeCliPath = settings.value.cliPaths[eng] || undefined
+      const personalWritingPrompt = settings.value.enablePersonalWritingPrompt
+        ? settings.value.personalWritingPrompt.trim() || undefined
+        : undefined
       await window.mark5.sendAgentTurn({
         sessionId: sess.id,
         rootPath: activeWorkspace.value.rootPath,
         prompt: agentPrompt,
         model: activeModel,
         cliPath: activeCliPath,
+        personalWritingPrompt,
         docRelPath: activeDocRelPath.value ?? sess.docRelPath,
         currentMarkdown: markdown.value
       })
@@ -674,7 +706,10 @@ export const useAppStore = defineStore('app', () => {
   async function ensureSessionForDocument(docRelPath: string): Promise<SessionRecord | null> {
     if (!activeWorkspace.value) return null
     const cur = activeSession.value
-    if (cur && !cur.archived && cur.docRelPath === docRelPath) {
+    if (cur && !cur.archived) {
+      if (!cur.docRelPath) {
+        cur.docRelPath = docRelPath
+      }
       return cur
     }
     const matched = sessions.value
@@ -745,12 +780,16 @@ export const useAppStore = defineStore('app', () => {
     sessionLiveStatusMap.value[targetSessionId] = '正在处理批注...'
     try {
       const eng: AgentEngine = sess.engine || 'agy'
+      const personalWritingPrompt = settings.value.enablePersonalWritingPrompt
+        ? settings.value.personalWritingPrompt.trim() || undefined
+        : undefined
       await window.mark5.sendAgentTurn({
         sessionId: targetSessionId,
         rootPath: activeWorkspace.value.rootPath,
         prompt: text,
         model: sess.model || settings.value.models[eng] || undefined,
         cliPath: settings.value.cliPaths[eng] || undefined,
+        personalWritingPrompt,
         docRelPath: activeDocRelPath.value,
         currentMarkdown: markdown.value,
         threadContext: {
@@ -809,12 +848,16 @@ export const useAppStore = defineStore('app', () => {
     sessionLiveStatusMap.value[targetSessionId] = '正在回复批注...'
     try {
       const eng: AgentEngine = sess.engine || 'agy'
+      const personalWritingPrompt = settings.value.enablePersonalWritingPrompt
+        ? settings.value.personalWritingPrompt.trim() || undefined
+        : undefined
       await window.mark5.sendAgentTurn({
         sessionId: targetSessionId,
         rootPath: activeWorkspace.value.rootPath,
         prompt: text,
         model: sess.model || settings.value.models[eng] || undefined,
         cliPath: settings.value.cliPaths[eng] || undefined,
+        personalWritingPrompt,
         docRelPath: activeDocRelPath.value,
         currentMarkdown: markdown.value,
         threadContext: {
