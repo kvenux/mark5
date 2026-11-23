@@ -75,10 +75,10 @@ fn read_saved_theme_sync() -> String {
 }
 
 fn theme_bg_color(theme: &str) -> tauri::window::Color {
-    if theme == "dark" {
-        tauri::window::Color(0x14, 0x14, 0x16, 0xff)
-    } else {
-        tauri::window::Color(0xff, 0xff, 0xff, 0xff)
+    match theme {
+        "dark" => tauri::window::Color(0x14, 0x14, 0x16, 0xff),
+        "light" => tauri::window::Color(0xff, 0xff, 0xff, 0xff),
+        _ => tauri::window::Color(0xfa, 0xf8, 0xf2, 0xff),
     }
 }
 
