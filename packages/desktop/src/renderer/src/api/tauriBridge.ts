@@ -75,7 +75,8 @@ export function installTauriMark5Bridge(): void {
       return invoke<{ ok: boolean; outPath?: string }>('export_document', { payload })
     },
 
-    openNewWindow: () => invoke<void>('open_new_window'),
+    openNewWindow: (theme) => invoke<void>('open_new_window', { theme: theme || null }),
+    setAppTheme: (theme) => invoke<void>('set_app_theme', { theme }),
     checkCliStatus: (paths) =>
       invoke<CliStatusItem[]>('check_cli_status', {
         agyPath: paths?.agyPath || null,

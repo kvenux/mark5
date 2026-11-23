@@ -373,17 +373,55 @@
     </div>
 
     <!-- Bottom Workspace Footer -->
-    <div class="sidebar-footer">
-      <select
-        :value="store.activeWorkspace?.rootPath"
+    <div class="sidebar-footer" @click.stop>
+      <button
+        class="ws-trigger"
+        :class="{ open: wsMenuOpen }"
         :title="store.activeWorkspace?.rootPath"
-        class="ws-select"
-        @change="onSelectWorkspace"
+        @click="toggleWsMenu"
       >
-        <option v-for="w in store.workspaces" :key="w.rootPath" :value="w.rootPath">
-          {{ w.name }}
-        </option>
-      </select>
+        <span class="ws-trigger-name">{{ store.activeWorkspace?.name || '选择工作区' }}</span>
+        <ChevronDown :size="14" :stroke-width="1.8" class="ws-trigger-chev" />
+      </button>
+
+      <div v-if="wsMenuOpen" class="ws-popover">
+        <div class="ws-pop-head">最近工作区</div>
+        <div class="ws-pop-list">
+          <div
+            v-for="w in store.workspaces"
+            :key="w.rootPath"
+            class="ws-opt"
+            :class="{ active: w.rootPath === store.activeWorkspace?.rootPath }"
+            :title="w.rootPath"
+            @click="pickRecentWorkspace(w.rootPath)"
+          >
+            <div class="ws-opt-main">
+              <span class="ws-opt-name">{{ w.name }}</span>
+              <span class="ws-opt-path">{{ w.rootPath }}</span>
+            </div>
+            <Check
+              v-if="w.rootPath === store.activeWorkspace?.rootPath"
+              :size="13"
+              :stroke-width="2.2"
+              class="ws-opt-check"
+            />
+            <button
+              v-else
+              class="ws-opt-remove"
+              title="从最近列表移除"
+              @click.stop="store.removeRecentWorkspace(w.rootPath)"
+            >
+              <X :size="12" :stroke-width="2" />
+            </button>
+          </div>
+        </div>
+        <div class="ws-pop-sep" />
+        <button class="ws-pop-action" @click="pickFolderFromMenu">
+          <FolderPlus :size="13" :stroke-width="1.8" />
+          <span>打开其他目录...</span>
+        </button>
+      </div>
+
       <button class="icon-btn" title="打开工作区目录" @click="store.pickWorkspace()">
         <FolderPlus :size="15" :stroke-width="1.75" />
       </button>
@@ -396,7 +434,18 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { FileText, FolderPlus, PanelLeftClose, Plus, Search, Settings, SquarePlus } from 'lucide-vue-next'
+import {
+  Check,
+  ChevronDown,
+  FileText,
+  FolderPlus,
+  PanelLeftClose,
+  Plus,
+  Search,
+  Settings,
+  SquarePlus,
+  X
+} from 'lucide-vue-next'
 import type { FileEntry } from '@shared/types'
 import { useAppStore } from '@/stores/appStore'
 import FileTreeNode from './FileTreeNode.vue'
@@ -560,10 +609,24 @@ async function onMenuDelete(id: string) {
   await store.deleteSession(id)
 }
 
-function onSelectWorkspace(e: Event) {
-  const val = (e.target as HTMLSelectElement).value
-  const ws = store.workspaces.find((w) => w.rootPath === val)
-  if (ws) store.switchWorkspace(ws)
+const wsMenuOpen = ref(false)
+
+function toggleWsMenu() {
+  menuSessionId.value = null
+  fileMenuEntry.value = null
+  wsMenuOpen.value = !wsMenuOpen.value
+}
+
+function pickRecentWorkspace(rootPath: string) {
+  wsMenuOpen.value = false
+  if (rootPath === store.activeWorkspace?.rootPath) return
+  const ws = store.workspaces.find((w) => w.rootPath === rootPath)
+  if (ws) void store.switchWorkspace(ws)
+}
+
+async function pickFolderFromMenu() {
+  wsMenuOpen.value = false
+  await store.pickWorkspace()
 }
 
 function formatTime(ts: number): string {
@@ -662,6 +725,7 @@ async function onFileNewFolder(entry: FileEntry) {
 const closeMenu = () => {
   menuSessionId.value = null
   fileMenuEntry.value = null
+  wsMenuOpen.value = false
 }
 
 const onKeyShortcut = (e: KeyboardEvent) => {
@@ -713,7 +777,7 @@ const onKeyShortcut = (e: KeyboardEvent) => {
 }
 
 async function openNewWindow() {
-  await window.mark5.openNewWindow?.()
+  await window.mark5.openNewWindow?.(store.settings.theme)
 }
 
 async function createNewDoc() {
@@ -1128,24 +1192,157 @@ onUnmounted(() => {
   padding: 12px 10px;
 }
 .sidebar-footer {
+  position: relative;
   height: 46px;
-  padding: 0 10px 0 12px;
+  padding: 0 10px 0 10px;
   border-top: 1px solid var(--border-hairline);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 4px;
 }
-.ws-select {
+.ws-trigger {
   flex: 1;
   min-width: 0;
-  border: none;
-  background: transparent;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   font-size: 12.5px;
   font-weight: 500;
   color: var(--ink-body);
-  padding: 4px 2px;
-  outline: none;
+  background: transparent;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.ws-trigger:hover,
+.ws-trigger.open {
+  background: var(--bg-hover);
+  color: var(--ink-primary);
+}
+.ws-trigger-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.ws-trigger-chev {
+  flex-shrink: 0;
+  color: var(--ink-muted);
+  transition: transform 0.15s ease;
+}
+.ws-trigger.open .ws-trigger-chev {
+  transform: rotate(180deg);
+}
+.ws-popover {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 65;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-pop-head {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-faint);
+  padding: 4px 8px 4px;
+}
+.ws-pop-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ws-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
   cursor: pointer;
+  color: var(--ink-body);
+}
+.ws-opt:hover {
+  background: var(--bg-hover);
+  color: var(--ink-primary);
+}
+.ws-opt.active {
+  background: var(--bg-active);
+  color: var(--ink-primary);
+}
+.ws-opt-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ws-opt-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-opt-path {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-opt-check {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.ws-opt-remove {
+  display: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 5px;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
+  flex-shrink: 0;
+}
+.ws-opt:hover .ws-opt-remove {
+  display: inline-flex;
+}
+.ws-opt-remove:hover {
+  background: var(--bg-subtle);
+  color: var(--ink-primary);
+}
+.ws-pop-sep {
+  height: 1px;
+  background: var(--border-hairline);
+  margin: 4px 6px;
+}
+.ws-pop-action {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--ink-body);
+  text-align: left;
+}
+.ws-pop-action:hover {
+  background: var(--bg-hover);
+  color: var(--ink-primary);
 }
 </style>

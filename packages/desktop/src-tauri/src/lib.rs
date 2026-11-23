@@ -56,6 +56,40 @@ async fn read_last_workspace() -> Option<String> {
     }
 }
 
+fn read_app_state_sync() -> serde_json::Value {
+    let Some(path) = app_state_file() else {
+        return serde_json::json!({});
+    };
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn read_saved_theme_sync() -> String {
+    read_app_state_sync()
+        .get("theme")
+        .and_then(|v| v.as_str())
+        .unwrap_or("warm")
+        .to_string()
+}
+
+fn theme_bg_color(theme: &str) -> tauri::window::Color {
+    if theme == "dark" {
+        tauri::window::Color(0x14, 0x14, 0x16, 0xff)
+    } else {
+        tauri::window::Color(0xff, 0xff, 0xff, 0xff)
+    }
+}
+
+fn theme_native_opt(theme: &str) -> Option<tauri::Theme> {
+    if theme == "dark" {
+        Some(tauri::Theme::Dark)
+    } else {
+        Some(tauri::Theme::Light)
+    }
+}
+
 async fn save_last_workspace(root_path: &str) {
     let Some(path) = app_state_file() else {
         return;
@@ -63,12 +97,45 @@ async fn save_last_workspace(root_path: &str) {
     if let Some(parent) = path.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
-    let payload = serde_json::json!({
-        "lastWorkspace": root_path
-    });
+    let mut payload = read_app_state_sync();
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("lastWorkspace".to_string(), serde_json::json!(root_path));
+    } else {
+        payload = serde_json::json!({ "lastWorkspace": root_path });
+    }
     if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
         let _ = tokio::fs::write(&path, bytes).await;
     }
+}
+
+#[tauri::command]
+async fn set_app_theme(app: AppHandle, theme: String) -> Result<(), String> {
+    let clean = match theme.trim() {
+        "dark" => "dark",
+        "light" => "light",
+        _ => "warm",
+    };
+    if let Some(path) = app_state_file() {
+        if let Some(parent) = path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        let mut payload = read_app_state_sync();
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("theme".to_string(), serde_json::json!(clean));
+        } else {
+            payload = serde_json::json!({ "theme": clean });
+        }
+        if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
+            let _ = tokio::fs::write(&path, bytes).await;
+        }
+    }
+    let bg = theme_bg_color(clean);
+    let native = theme_native_opt(clean);
+    for w in app.webview_windows().values() {
+        let _ = w.set_background_color(Some(bg));
+        let _ = w.set_theme(native);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -716,14 +783,27 @@ fn attach_background_memory_trim(win: &tauri::WebviewWindow) {
 }
 
 #[tauri::command]
-async fn open_new_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn open_new_window(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    theme: Option<String>,
+) -> Result<(), String> {
     let idx = state.win_counter.fetch_add(1, Ordering::SeqCst) + 1;
     let label = format!("mark5-win-{idx}");
-    let win = WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
+    let effective_theme = theme
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(read_saved_theme_sync);
+    let bg = theme_bg_color(&effective_theme);
+    let mut builder = WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
         .title("Mark 5")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1024.0, 680.0)
-        .additional_browser_args(WV2_LEAN_ARGS)
+        .background_color(bg)
+        .additional_browser_args(WV2_LEAN_ARGS);
+    if let Some(native_theme) = theme_native_opt(&effective_theme) {
+        builder = builder.theme(Some(native_theme));
+    }
+    let win = builder
         .build()
         .map_err(|e| format!("open_new_window failed: {e}"))?;
     attach_background_memory_trim(&win);
@@ -757,6 +837,9 @@ pub fn run() {
             });
 
             if let Some(main_win) = app.get_webview_window("main") {
+                let saved_theme = read_saved_theme_sync();
+                let _ = main_win.set_background_color(Some(theme_bg_color(&saved_theme)));
+                let _ = main_win.set_theme(theme_native_opt(&saved_theme));
                 attach_background_memory_trim(&main_win);
             }
 
@@ -810,6 +893,7 @@ pub fn run() {
             check_cli_status,
             list_engine_models,
             open_new_window,
+            set_app_theme,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Mark 5 Tauri app");

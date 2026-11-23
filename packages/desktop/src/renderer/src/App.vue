@@ -200,7 +200,7 @@ watch(
 const onWindowKeydown = (e: KeyboardEvent) => {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
     e.preventDefault()
-    void window.mark5.openNewWindow?.()
+    void window.mark5.openNewWindow?.(store.settings.theme)
   } else if ((e.ctrlKey || e.metaKey) && e.key === ',') {
     e.preventDefault()
     openSettings('appearance')

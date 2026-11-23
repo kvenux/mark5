@@ -61,6 +61,7 @@ function applyThemeToDom(s: AppSettings) {
   root.setAttribute('data-theme', s.theme)
   root.style.setProperty('--editor-font-size', `${s.editorFontSize}px`)
   root.style.setProperty('--editor-max-width', `${s.editorMaxWidth}px`)
+  void window.mark5?.setAppTheme?.(s.theme)
 }
 
 export interface QueuedBlockAnim {

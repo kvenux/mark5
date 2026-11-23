@@ -250,7 +250,8 @@ export interface Mark5API {
   }): Promise<{ ok: boolean; outPath?: string; message?: string }>
 
   // Multi-window & CLI diagnostics
-  openNewWindow?: () => Promise<void>
+  openNewWindow?: (theme?: AppTheme) => Promise<void>
+  setAppTheme?: (theme: AppTheme) => Promise<void>
   checkCliStatus?: (paths?: {
     agyPath?: string
     claudePath?: string
