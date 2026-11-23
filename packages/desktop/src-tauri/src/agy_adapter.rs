@@ -994,12 +994,14 @@ const SYSTEM_WRITING_RULES: &str = r#"## 通用写作准则（软件默认）
 fn build_prompt(req: &SendAgentTurnPayload, mcp_name: &str) -> String {
     let mut parts = vec![
         format!("你是 Mark 5 本地 Markdown 协同写作助手。你的本地文档 MCP 工具集名称为 `{mcp_name}`。"),
+        format!(
+            "## 工具使用硬性约束（最高优先级）\n- 编辑、新增或删除 Markdown（.md）文档内容时，必须使用 `{mcp_name}` 的 `doc_*` 工具（`doc_create_skeleton` / `doc_read_blocks` / `doc_replace_block` / `doc_insert_block` / `doc_delete_block`），禁止使用文件编辑工具或命令行直接改写 `.md` 文件，否则编辑器无法同步实时动画与 Diff 审阅。\n- 修改或插入段落前，先调用 `doc_read_blocks` 获取最新实时段落与块索引；回复批注用 `doc_reply_comment`，需要人工确认处可用 `doc_create_comment` 挂载批注。"
+        ),
         format!("当前工作区：{}", req.root_path),
     ];
     if let Some(ref doc) = req.doc_rel_path {
         parts.push(format!("当前打开文档：{doc}"));
     }
-    parts.push("协作规范：创建新文档用 doc_create_skeleton；修改段落前先用 doc_read_blocks 获取最新内容再用 doc_replace_block / doc_insert_block；批注问题用 doc_reply_comment 回复。".to_string());
     parts.push(SYSTEM_WRITING_RULES.to_string());
     if let Some(ref personal) = req.personal_writing_prompt {
         let trimmed = personal.trim();
