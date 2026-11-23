@@ -236,9 +236,9 @@ const themes: Array<{
   border: string
   accent: string
 }> = [
-  { id: 'warm', label: '暖纸白', bg: '#ffffff', side: '#faf9f5', border: '#dfddd5', accent: '#c96442' },
+  { id: 'warm', label: '暖纸白', bg: '#ffffff', side: '#faf9f5', border: '#dfddd5', accent: '#2563eb' },
   { id: 'light', label: '纯净白', bg: '#ffffff', side: '#f6f7f9', border: '#dee2e6', accent: '#2563eb' },
-  { id: 'dark', label: '深邃暗', bg: '#141416', side: '#1b1b1e', border: '#34343d', accent: '#d97757' }
+  { id: 'dark', label: '深邃暗', bg: '#141416', side: '#1b1b1e', border: '#34343d', accent: '#3b82f6' }
 ]
 
 const engines: Array<{

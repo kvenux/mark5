@@ -173,10 +173,10 @@
           }"
         >
           <div
-            v-if="animState.showStream && animState.streamText"
+            v-if="animState.showStream && (animState.streamHtml || animState.streamText)"
             ref="streamPreviewEl"
             class="agent-stream-preview stream-md"
-            v-html="renderStreamMd(animState.streamText)"
+            v-html="animState.streamHtml || renderStreamMd(animState.streamText)"
           />
         </div>
 
@@ -793,6 +793,7 @@ const animState = reactive({
   badge: '',
   detail: '',
   streamText: '',
+  streamHtml: '',
   showStream: false,
   boxTop: 0,
   boxLeft: 0,
@@ -914,9 +915,16 @@ const changedBarRects = computed(() => {
   const els = getTopBlockElements()
   if (!wrap || els.length === 0 || pendingChanges.value.length === 0) return []
   const wRect = wrap.getBoundingClientRect()
+  const totalMdBlocks = Math.max(els.length, splitTopBlocks(store.markdown).length)
   const out: Array<{ changeId: string; blockIndex: number; top: number; left: number; height: number }> = []
   for (const ch of pendingChanges.value) {
-    const el = els[Math.min(Math.max(0, ch.blockIndex), els.length - 1)]
+    const domIdx = findDomBlockIndex(
+      ch.newMarkdown || ch.oldMarkdown,
+      ch.blockIndex,
+      els,
+      totalMdBlocks
+    )
+    const el = domIdx >= 0 ? els[domIdx] : els[Math.min(Math.max(0, ch.blockIndex), els.length - 1)]
     if (!el) continue
     const tRect = el.getBoundingClientRect()
     out.push({
@@ -1411,6 +1419,89 @@ function getTopBlockElements(): HTMLElement[] {
   return Array.from(editorRoot.children) as HTMLElement[]
 }
 
+function normalizeTextForBlockMatch(raw: string): string {
+  return raw
+    .replace(/^---[\s\S]*?---$/m, (m) => m.replace(/^---|---$/gm, ''))
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^>\s?/gm, '')
+    .replace(/^(\s*[-*+]|\s*\d+\.)\s+/gm, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+function findDomBlockIndex(
+  mdText: string | undefined,
+  fallbackBlockIdx: number,
+  els: HTMLElement[],
+  totalMdBlocks: number
+): number {
+  if (els.length === 0) return -1
+  const needle = mdText ? normalizeTextForBlockMatch(mdText) : ''
+  const expectedRatio =
+    totalMdBlocks > 1 ? Math.min(1, Math.max(0, fallbackBlockIdx / (totalMdBlocks - 1))) : 0
+
+  if (needle.length >= 2) {
+    let bestIdx = -1
+    let bestScore = -1
+    let bestDist = Infinity
+    for (let i = 0; i < els.length; i++) {
+      const hay = normalizeTextForBlockMatch(els[i].innerText || '')
+      if (!hay) continue
+      let score = 0
+      if (hay === needle) {
+        score = 100
+      } else if (hay.includes(needle) || needle.includes(hay)) {
+        score = 80
+      } else {
+        const prefix = needle.slice(0, Math.min(16, needle.length))
+        if (prefix.length >= 6 && hay.includes(prefix)) {
+          score = 60
+        }
+      }
+      if (score > 0) {
+        const ratio = els.length > 1 ? i / (els.length - 1) : 0
+        const dist = Math.abs(ratio - expectedRatio)
+        if (score > bestScore || (score === bestScore && dist < bestDist)) {
+          bestScore = score
+          bestDist = dist
+          bestIdx = i
+        }
+      }
+    }
+    if (bestIdx >= 0) return bestIdx
+  }
+
+  const scaled =
+    totalMdBlocks > 0
+      ? Math.round((fallbackBlockIdx / Math.max(1, totalMdBlocks)) * els.length)
+      : fallbackBlockIdx
+  return Math.min(Math.max(0, scaled), els.length - 1)
+}
+
+let activeInsertSpacerEl: HTMLElement | null = null
+function setInsertSpacer(el: HTMLElement | null, extraPx: number) {
+  if (activeInsertSpacerEl && activeInsertSpacerEl !== el) {
+    activeInsertSpacerEl.style.marginBottom = ''
+    activeInsertSpacerEl.style.transition = ''
+    activeInsertSpacerEl = null
+  }
+  if (!el) return
+  el.style.transition = 'margin-bottom 0.14s ease'
+  el.style.marginBottom = `${Math.max(0, Math.round(extraPx))}px`
+  activeInsertSpacerEl = el
+}
+function clearInsertSpacer() {
+  if (activeInsertSpacerEl) {
+    activeInsertSpacerEl.style.marginBottom = ''
+    activeInsertSpacerEl.style.transition = ''
+    activeInsertSpacerEl = null
+  }
+}
+
 function scrollBlockToGoldenZone(target: HTMLElement) {
   const scroller = scrollEl.value
   if (!scroller || Date.now() < userScrollPausedUntil) return
@@ -1431,11 +1522,17 @@ function positionOverlayOnBlock(
   blockIndex: number,
   label: string,
   detail: string,
-  shouldScroll = true
+  shouldScroll = true,
+  matchMarkdown?: string,
+  totalMdBlocks?: number
 ) {
   const wrap = hostWrapEl.value
   const els = getTopBlockElements()
-  const target = els[Math.min(Math.max(0, blockIndex), Math.max(0, els.length - 1))]
+  const domIdx =
+    matchMarkdown !== undefined
+      ? findDomBlockIndex(matchMarkdown, blockIndex, els, totalMdBlocks ?? els.length)
+      : Math.min(Math.max(0, blockIndex), Math.max(0, els.length - 1))
+  const target = els[domIdx]
   if (!wrap || !target) return
 
   if (shouldScroll) {
@@ -1460,12 +1557,15 @@ function positionOverlayForInsert(
   insertIndex: number,
   label: string,
   detail: string,
-  shouldScroll = true
+  shouldScroll = true,
+  prevBlockMarkdown?: string,
+  totalMdBlocks?: number
 ) {
   const wrap = hostWrapEl.value
   const els = getTopBlockElements()
   if (!wrap) return
 
+  clearInsertSpacer()
   const wRect = wrap.getBoundingClientRect()
   if (els.length === 0) {
     animState.boxTop = 8
@@ -1481,13 +1581,21 @@ function positionOverlayForInsert(
     animState.boxWidth = fRect.width + 20
     animState.boxHeight = 44
   } else {
-    const prev = els[Math.min(insertIndex - 1, els.length - 1)]
+    const prevDomIdx =
+      prevBlockMarkdown !== undefined
+        ? findDomBlockIndex(prevBlockMarkdown, insertIndex - 1, els, totalMdBlocks ?? els.length)
+        : Math.min(insertIndex - 1, els.length - 1)
+    const prev = els[Math.max(0, prevDomIdx)]
     if (shouldScroll) scrollBlockToGoldenZone(prev)
     const pRect = prev.getBoundingClientRect()
     animState.boxTop = Math.max(0, pRect.bottom - wRect.top + 8)
     animState.boxLeft = Math.max(0, pRect.left - wRect.left - 10)
     animState.boxWidth = pRect.width + 20
     animState.boxHeight = 44
+    // When inserting in the middle of the document, open space below prev so the typing box never overlaps the next block
+    if (prevDomIdx >= 0 && prevDomIdx < els.length - 1) {
+      setInsertSpacer(prev, animState.boxHeight + 16)
+    }
   }
 
   animState.cursorX = Math.max(animState.boxLeft + 8, animState.boxLeft + animState.boxWidth - 246)
@@ -1516,6 +1624,7 @@ function skipAllOps() {
 
 function abortAnimation(persistHumanContent = false) {
   const wasRunning = animState.running
+  clearInsertSpacer()
   animState.runId += 1
   animState.running = false
   animState.visible = false
@@ -1544,6 +1653,203 @@ function handleEditorMouseDown(e: MouseEvent) {
 
 const PUNCT_PAUSE_RE = /[，。；：！？、,.;!?]/
 
+interface BlockDiffUnit {
+  kind: 'modify' | 'insert' | 'delete'
+  unitIdx: number
+  oldMd: string
+  newMd: string
+  anchorPrevMd: string
+}
+
+function escapeAnimHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * Layer 1: Block-level LCS Diff between curBlocks and nextBlocks.
+ * Produces minimal ordered edit units (modify / insert / delete) with exact running indices
+ * and content-anchored previous block text so we never drift on loose lists or front-matter.
+ */
+function computeBlockDiffPlan(curBlocks: string[], nextBlocks: string[]): BlockDiffUnit[] {
+  const m = curBlocks.length
+  const n = nextBlocks.length
+  const dp: Uint16Array[] = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1))
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      if (curBlocks[i] === nextBlocks[j]) {
+        dp[i][j] = dp[i + 1][j + 1] + 1
+      } else {
+        dp[i][j] = dp[i + 1][j] >= dp[i][j + 1] ? dp[i + 1][j] : dp[i][j + 1]
+      }
+    }
+  }
+
+  type RawStep = { kind: 'equal' | 'delete' | 'insert'; text: string }
+  const raw: RawStep[] = []
+  let i = 0
+  let j = 0
+  while (i < m && j < n) {
+    if (curBlocks[i] === nextBlocks[j]) {
+      raw.push({ kind: 'equal', text: curBlocks[i] })
+      i++
+      j++
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      raw.push({ kind: 'delete', text: curBlocks[i] })
+      i++
+    } else {
+      raw.push({ kind: 'insert', text: nextBlocks[j] })
+      j++
+    }
+  }
+  while (i < m) raw.push({ kind: 'delete', text: curBlocks[i++] })
+  while (j < n) raw.push({ kind: 'insert', text: nextBlocks[j++] })
+
+  // Pair adjacent delete + insert runs into modify units, and compute running indices
+  const units: BlockDiffUnit[] = []
+  let runIdx = 0
+  let lastCommittedMd = ''
+  let k = 0
+  while (k < raw.length) {
+    if (raw[k].kind === 'equal') {
+      lastCommittedMd = raw[k].text
+      runIdx += 1
+      k += 1
+      continue
+    }
+    const dels: string[] = []
+    const ins: string[] = []
+    while (k < raw.length && raw[k].kind !== 'equal') {
+      if (raw[k].kind === 'delete') dels.push(raw[k].text)
+      else ins.push(raw[k].text)
+      k += 1
+    }
+    const pairCount = Math.min(dels.length, ins.length)
+    for (let p = 0; p < pairCount; p++) {
+      units.push({
+        kind: 'modify',
+        unitIdx: runIdx,
+        oldMd: dels[p],
+        newMd: ins[p],
+        anchorPrevMd: lastCommittedMd
+      })
+      lastCommittedMd = ins[p]
+      runIdx += 1
+    }
+    for (let p = pairCount; p < dels.length; p++) {
+      units.push({
+        kind: 'delete',
+        unitIdx: runIdx,
+        oldMd: dels[p],
+        newMd: '',
+        anchorPrevMd: lastCommittedMd
+      })
+      // runIdx does not advance on delete
+    }
+    for (let p = pairCount; p < ins.length; p++) {
+      units.push({
+        kind: 'insert',
+        unitIdx: runIdx,
+        oldMd: '',
+        newMd: ins[p],
+        anchorPrevMd: lastCommittedMd
+      })
+      lastCommittedMd = ins[p]
+      runIdx += 1
+    }
+  }
+  return units
+}
+
+interface InlineEditHunk {
+  kind: 'same' | 'edit'
+  sameText?: string
+  delText?: string
+  addText?: string
+}
+
+function groupInlineDiffIntoHunks(
+  segments: Array<{ kind: 'same' | 'del' | 'add'; text: string }>
+): InlineEditHunk[] {
+  const hunks: InlineEditHunk[] = []
+  let i = 0
+  while (i < segments.length) {
+    if (segments[i].kind === 'same') {
+      hunks.push({ kind: 'same', sameText: segments[i].text })
+      i++
+      continue
+    }
+    let delText = ''
+    let addText = ''
+    while (i < segments.length && segments[i].kind !== 'same') {
+      if (segments[i].kind === 'del') delText += segments[i].text
+      else addText += segments[i].text
+      i++
+    }
+    hunks.push({ kind: 'edit', delText, addText })
+  }
+  return hunks
+}
+
+/**
+ * Human-like sequential inline editing renderer:
+ * - Past hunks (< activeEditIdx): already finalized (addText only, delText gone!)
+ * - Active hunk (=== activeEditIdx):
+ *     - 'select': old text highlighted as selected + caret (just before Backspace)
+ *     - 'type':   old text deleted, new text typed char-by-char at the live caret
+ * - Future hunks (> activeEditIdx): still untouched original text (delText)
+ * Result: when the final hunk finishes, the DOM text & line-breaks match Muya 100% -> ZERO endpoint jump!
+ */
+function renderHumanInlineEditHtml(
+  hunks: InlineEditHunk[],
+  activeEditIdx: number,
+  subPhase: 'select' | 'type' | 'done',
+  typedChars: number
+): string {
+  let html = ''
+  let editSeq = 0
+  for (const h of hunks) {
+    if (h.kind === 'same') {
+      html += escapeAnimHtml(h.sameText || '')
+      continue
+    }
+    const myEditIdx = editSeq++
+    const del = h.delText || ''
+    const add = h.addText || ''
+
+    if (myEditIdx < activeEditIdx || subPhase === 'done') {
+      if (add) {
+        html += `<span class="anim-diff-done">${escapeAnimHtml(add)}</span>`
+      }
+    } else if (myEditIdx === activeEditIdx) {
+      if (subPhase === 'select') {
+        if (del) {
+          html += `<span class="anim-diff-select">${escapeAnimHtml(del)}</span><span class="agent-caret"></span>`
+        } else {
+          html += '<span class="agent-caret"></span>'
+        }
+      } else {
+        const chars = Array.from(add)
+        const shown = chars.slice(0, Math.min(chars.length, typedChars)).join('')
+        if (shown) {
+          html += `<span class="anim-diff-add">${escapeAnimHtml(shown)}</span><span class="agent-caret"></span>`
+        } else {
+          html += '<span class="agent-caret"></span>'
+        }
+      }
+    } else {
+      // Untouched future edit: keep original text in place
+      if (del) {
+        html += escapeAnimHtml(del)
+      }
+    }
+  }
+  return `<p style="margin:0;white-space:pre-wrap">${html}</p>`
+}
+
 async function drainOpQueue() {
   const myRunId = ++animState.runId
   animState.running = true
@@ -1571,104 +1877,211 @@ async function drainOpQueue() {
       continue
     }
 
-    animState.batchCurrent += 1
-    const remainingForDoc = store.pendingDocOps.filter(
+    const remainingOpsForDoc = store.pendingDocOps.filter(
       (x) => x.op.docRelPath === store.activeDocRelPath
     ).length
-    animState.batchTotal = Math.max(animState.batchTotal, animState.batchCurrent + remainingForDoc)
 
-    animState.skip = animState.skipAll
-    const currentMd = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
+    const currentMd = store.markdown || (muyaInstance ? muyaInstance.getMarkdown() : '')
     const blocks = splitTopBlocks(currentMd)
 
-    const targetIdx =
-      op.type === 'insert_block'
-        ? Math.min(blocks.length, Math.max(0, op.afterBlockIndex + 1))
-        : Math.min(Math.max(0, op.blockIndex), Math.max(0, blocks.length - 1))
-
-    const prevBlockMarkdown =
-      op.type === 'insert_block' ? '' : (blocks[targetIdx] ?? '')
-    const nextBlockMarkdown =
-      op.type === 'delete_block' ? '' : (op.newMarkdown ?? '')
-
-    // Split multi-block chapter inserts/expansions into individual paragraph-level unit blocks
-    // so each block types with live Markdown rendering and commits immediately to Muya!
-    const rawUnits =
-      op.type === 'delete_block' ? [''] : splitTopBlocks(nextBlockMarkdown)
-    const unitBlocks = rawUnits.length > 0 ? rawUnits : [nextBlockMarkdown]
-    if (unitBlocks.length > 1) {
-      animState.batchTotal += unitBlocks.length - 1
+    // Determine authoritative target blocks (Invariant 1: Truth Convergence)
+    let nextBlocks: string[]
+    if (op.resultingMarkdown !== undefined) {
+      nextBlocks = splitTopBlocks(op.resultingMarkdown)
+    } else {
+      nextBlocks = [...blocks]
+      const targetIdx =
+        op.type === 'insert_block'
+          ? Math.min(blocks.length, Math.max(0, op.afterBlockIndex + 1))
+          : Math.min(Math.max(0, op.blockIndex), Math.max(0, blocks.length - 1))
+      if (op.type === 'delete_block') {
+        nextBlocks.splice(targetIdx, 1)
+      } else {
+        const parts = splitTopBlocks(op.newMarkdown ?? '')
+        const toApply = parts.length > 0 ? parts : [op.newMarkdown ?? '']
+        if (op.type === 'insert_block') {
+          nextBlocks.splice(targetIdx, 0, ...toApply)
+        } else {
+          nextBlocks.splice(targetIdx, 1, ...toApply)
+        }
+      }
     }
 
-    for (let u = 0; u < unitBlocks.length; u++) {
-      if (animState.runId !== myRunId) return
-      if (u > 0) {
-        animState.batchCurrent += 1
+    // Layer 1: Compute exact block-level diff plan
+    const diffUnits = computeBlockDiffPlan(blocks, nextBlocks)
+    if (diffUnits.length === 0) {
+      // No visual diff, ensure final markdown converges
+      if (op.resultingMarkdown !== undefined && op.resultingMarkdown !== store.markdown) {
+        store.markdown = op.resultingMarkdown
+        setMuyaMarkdownQuietly(op.resultingMarkdown)
       }
-      const unitMd = unitBlocks[u]
+      continue
+    }
+
+    animState.batchTotal = Math.max(
+      animState.batchTotal,
+      animState.batchCurrent + diffUnits.length + remainingOpsForDoc
+    )
+
+    for (let u = 0; u < diffUnits.length; u++) {
+      if (animState.runId !== myRunId) return
+      animState.batchCurrent += 1
+      const unit = diffUnits[u]
       const unitType: PendingBlockChange['type'] =
-        op.type === 'delete_block'
+        unit.kind === 'delete'
           ? 'delete_block'
-          : op.type === 'insert_block' || u > 0
+          : unit.kind === 'insert'
             ? 'insert_block'
             : 'replace_block'
-      const unitIdx = targetIdx + u
-      const unitOldMd = unitType === 'replace_block' ? prevBlockMarkdown : ''
-      const remainingUnits = remainingForDoc + (unitBlocks.length - 1 - u)
+      const unitIdx = unit.unitIdx
+      const unitOldMd = unit.oldMd
+      const unitMd = unit.newMd
+      const remainingUnits = remainingOpsForDoc + (diffUnits.length - 1 - u)
 
       animState.skip = animState.skipAll
+      let modifyAnchorEl: HTMLElement | null = null
+      let modifyOrigBoxH = 0
 
       if (!animState.skipAll) {
         animState.activeBlockIndex = unitIdx
         animState.phase = 'lock'
         animState.progress = 0
         animState.streamText = ''
+        animState.streamHtml = ''
         animState.showStream = false
         animState.badge =
           animState.batchTotal > 1 ? `${animState.batchCurrent}/${animState.batchTotal}` : ''
         if (unitType === 'insert_block') {
-          positionOverlayForInsert(unitIdx, op.label, `定位第 ${unitIdx + 1} 段`, true)
+          positionOverlayForInsert(
+            unitIdx,
+            op.label,
+            `定位第 ${unitIdx + 1} 段`,
+            true,
+            unit.anchorPrevMd,
+            blocks.length
+          )
         } else {
-          positionOverlayOnBlock(unitIdx, op.label, `定位第 ${unitIdx + 1} 段`, true)
+          const els = getTopBlockElements()
+          const domIdx = findDomBlockIndex(unitOldMd, unitIdx, els, blocks.length)
+          modifyAnchorEl = domIdx >= 0 ? els[domIdx] : null
+          positionOverlayOnBlock(
+            unitIdx,
+            op.label,
+            `定位第 ${unitIdx + 1} 段`,
+            true,
+            unitOldMd,
+            blocks.length
+          )
+          modifyOrigBoxH = animState.boxHeight
         }
-        await sleep(remainingUnits >= 3 ? 160 : 320)
+        await sleep(remainingUnits >= 3 ? 130 : 240)
         while (animState.paused && animState.runId === myRunId) await sleep(80)
         if (animState.runId !== myRunId) return
       }
 
-      if ((unitType === 'replace_block' || unitType === 'insert_block') && !animState.skip) {
-        const chars = Array.from(unitMd)
-        const totalChars = chars.length
+      // Layer 2: Minimal Diff-Level Animation vs Streaming Insert/Rewrite
+      if (unitType === 'replace_block' && !animState.skip) {
+        const inlineSegs = computeInlineDiff(unitOldMd, unitMd)
+        const totalOld = Math.max(1, Array.from(unitOldMd).length)
+        const totalNew = Math.max(1, Array.from(unitMd).length)
+        const changedChars = inlineSegs
+          .filter((s) => s.kind !== 'same')
+          .reduce((acc, s) => acc + Array.from(s.text).length, 0)
+        const changeRatio = changedChars / (totalOld + totalNew)
+        const addedTotal = inlineSegs
+          .filter((s) => s.kind === 'add')
+          .reduce((acc, s) => acc + Array.from(s.text).length, 0)
+        const hasDeletes = inlineSegs.some((s) => s.kind === 'del')
 
-        animState.phase = 'writing'
-        animState.showStream = totalChars > 0
+        // Partial edit (< 65% changed): Human-like sequential select -> delete -> type in place!
+        const editHunks = groupInlineDiffIntoHunks(inlineSegs)
+        const totalEditHunks = editHunks.filter((h) => h.kind === 'edit').length
+        if (changeRatio < 0.65 && totalEditHunks > 0) {
+          animState.phase = 'writing'
+          animState.showStream = true
+          animState.streamText = ''
 
-        if (remainingUnits >= 3) {
-          const fastSteps = Math.min(14, Math.max(6, totalChars))
-          for (let s = 1; s <= fastSteps; s++) {
-            if (animState.runId !== myRunId || animState.skip) break
-            const count = Math.min(totalChars, Math.ceil((totalChars * s) / fastSteps))
-            animState.streamText = chars.slice(0, count).join('')
-            await nextTick()
-            if (streamPreviewEl.value) {
-              const neededH = streamPreviewEl.value.offsetHeight + 8
-              if (neededH > animState.boxHeight) animState.boxHeight = neededH
-            }
-            await sleep(24)
-          }
-        } else {
-          // Human-readable real typing cadence (~15 chars/sec default, ~24 chars/sec with slight backlog)
-          const baseMsPerChar = remainingUnits >= 1 ? 42 : 62
-          const maxDurationMs = remainingUnits >= 1 ? 2600 : 4500
-          const charsPerTick = Math.max(1, Math.ceil((totalChars * baseMsPerChar) / maxDurationMs))
-          const tickDelay = Math.max(
-            26,
-            Math.min(
-              baseMsPerChar,
-              Math.round(maxDurationMs / Math.max(1, totalChars / charsPerTick))
-            )
+          const selectMs = remainingUnits >= 2 ? 90 : totalEditHunks >= 6 ? 140 : 220
+          const betweenHunksMs = remainingUnits >= 2 ? 30 : totalEditHunks >= 6 ? 55 : 90
+          const baseCharMs = remainingUnits >= 2 ? 20 : totalEditHunks >= 6 ? 28 : 40
+          const charsPerTick = Math.max(
+            1,
+            Math.ceil((Math.max(1, addedTotal) * baseCharMs) / 2600)
           )
 
+          const syncModifyHeight = async () => {
+            await nextTick()
+            if (streamPreviewEl.value) {
+              const neededH = Math.max(36, streamPreviewEl.value.offsetHeight + 12)
+              animState.boxHeight = neededH
+              if (modifyAnchorEl) {
+                setInsertSpacer(modifyAnchorEl, Math.max(0, neededH - modifyOrigBoxH))
+              }
+            }
+          }
+
+          let eIdx = 0
+          for (const h of editHunks) {
+            if (h.kind !== 'edit') continue
+            if (animState.runId !== myRunId || animState.skip) break
+            while (animState.paused && animState.runId === myRunId) await sleep(80)
+
+            const del = h.delText || ''
+            const add = h.addText || ''
+
+            // Step 1: Select old text (like dragging selection before Backspace)
+            if (del) {
+              animState.streamHtml = renderHumanInlineEditHtml(editHunks, eIdx, 'select', 0)
+              await syncModifyHeight()
+              await sleep(selectMs)
+              if (animState.runId !== myRunId || animState.skip) break
+            }
+
+            // Step 2: Delete selected text & type new text at the live caret
+            const addChars = Array.from(add)
+            if (addChars.length === 0) {
+              // Pure deletion: show caret cleanly at deletion point
+              animState.streamHtml = renderHumanInlineEditHtml(editHunks, eIdx, 'type', 0)
+              await syncModifyHeight()
+              await sleep(betweenHunksMs)
+            } else {
+              for (let c = charsPerTick; c <= addChars.length + charsPerTick - 1; c += charsPerTick) {
+                if (animState.runId !== myRunId || animState.skip) break
+                while (animState.paused && animState.runId === myRunId) await sleep(80)
+                animState.streamHtml = renderHumanInlineEditHtml(
+                  editHunks,
+                  eIdx,
+                  'type',
+                  Math.min(addChars.length, c)
+                )
+                await syncModifyHeight()
+                await sleep(baseCharMs)
+              }
+              await sleep(betweenHunksMs)
+            }
+            eIdx += 1
+          }
+
+          // Final resting frame before commit: text & line-breaks match Muya 100% (zero jump!)
+          if (animState.runId === myRunId && !animState.skip) {
+            animState.streamHtml = renderHumanInlineEditHtml(editHunks, totalEditHunks, 'done', 0)
+            await syncModifyHeight()
+            await sleep(120)
+          }
+        } else {
+          // Substantial rewrite (>= 65% changed): smooth streaming rewrite with in-flow spacer
+          const chars = Array.from(unitMd)
+          const totalChars = chars.length
+          animState.phase = 'writing'
+          animState.streamHtml = ''
+          animState.showStream = totalChars > 0
+          const baseMsPerChar = remainingUnits >= 3 ? 16 : remainingUnits >= 1 ? 30 : 48
+          const maxDurationMs = remainingUnits >= 3 ? 900 : remainingUnits >= 1 ? 1800 : 3200
+          const charsPerTick = Math.max(1, Math.ceil((totalChars * baseMsPerChar) / maxDurationMs))
+          const tickDelay = Math.max(
+            22,
+            Math.min(baseMsPerChar, Math.round(maxDurationMs / Math.max(1, totalChars / charsPerTick)))
+          )
           for (let i = charsPerTick; i <= totalChars + charsPerTick - 1; i += charsPerTick) {
             if (animState.runId !== myRunId || animState.skip) break
             while (animState.paused && animState.runId === myRunId) await sleep(80)
@@ -1676,25 +2089,62 @@ async function drainOpQueue() {
             animState.streamText = chars.slice(0, count).join('')
             await nextTick()
             if (streamPreviewEl.value) {
-              const neededH = streamPreviewEl.value.offsetHeight + 8
-              if (neededH > animState.boxHeight) animState.boxHeight = neededH
+              const neededH = streamPreviewEl.value.offsetHeight + 10
+              if (neededH > animState.boxHeight) {
+                animState.boxHeight = neededH
+                if (modifyAnchorEl) setInsertSpacer(modifyAnchorEl, neededH - modifyOrigBoxH)
+              }
             }
             const lastChar = chars[count - 1] || ''
-            const extraPause = charsPerTick === 1 && PUNCT_PAUSE_RE.test(lastChar) ? 95 : 0
+            const extraPause = charsPerTick === 1 && PUNCT_PAUSE_RE.test(lastChar) ? 70 : 0
             await sleep(tickDelay + extraPause)
           }
         }
+      } else if (unitType === 'insert_block' && !animState.skip) {
+        const chars = Array.from(unitMd)
+        const totalChars = chars.length
+        animState.phase = 'writing'
+        animState.streamHtml = ''
+        animState.showStream = totalChars > 0
+
+        // Adaptive pacing for consecutive multi-paragraph inserts (smooth & brisk when 3+ queued)
+        const baseMsPerChar = remainingUnits >= 3 ? 16 : remainingUnits >= 1 ? 28 : 46
+        const maxDurationMs = remainingUnits >= 3 ? 850 : remainingUnits >= 1 ? 1600 : 2800
+        const charsPerTick = Math.max(1, Math.ceil((totalChars * baseMsPerChar) / maxDurationMs))
+        const tickDelay = Math.max(
+          22,
+          Math.min(baseMsPerChar, Math.round(maxDurationMs / Math.max(1, totalChars / charsPerTick)))
+        )
+
+        for (let i = charsPerTick; i <= totalChars + charsPerTick - 1; i += charsPerTick) {
+          if (animState.runId !== myRunId || animState.skip) break
+          while (animState.paused && animState.runId === myRunId) await sleep(80)
+          const count = Math.min(totalChars, i)
+          animState.streamText = chars.slice(0, count).join('')
+          await nextTick()
+          if (streamPreviewEl.value) {
+            const neededH = streamPreviewEl.value.offsetHeight + 10
+            if (neededH > animState.boxHeight) {
+              animState.boxHeight = neededH
+              if (activeInsertSpacerEl) setInsertSpacer(activeInsertSpacerEl, animState.boxHeight + 16)
+            }
+          }
+          const lastChar = chars[count - 1] || ''
+          const extraPause = charsPerTick === 1 && PUNCT_PAUSE_RE.test(lastChar) ? 70 : 0
+          await sleep(tickDelay + extraPause)
+        }
       } else if (unitType === 'delete_block' && !animState.skip) {
         animState.phase = 'writing'
-        await sleep(340)
+        await sleep(280)
       }
 
       if (animState.runId !== myRunId) return
 
       animState.showStream = false
       animState.streamText = ''
+      animState.streamHtml = ''
 
-      // Commit THIS single unit block immediately to Muya so formatted Markdown renders progressively!
+      // Commit THIS single diff unit immediately to Muya so it becomes the real DOM anchor for the next unit!
       if (unitType === 'delete_block') {
         blocks.splice(unitIdx, 1)
       } else if (unitType === 'insert_block') {
@@ -1703,7 +2153,7 @@ async function drainOpQueue() {
         blocks[unitIdx] = unitMd
       }
 
-      const isLastUnit = u === unitBlocks.length - 1
+      const isLastUnit = u === diffUnits.length - 1
       if (isLastUnit && op.resultingMarkdown !== undefined) {
         store.markdown = op.resultingMarkdown
         setMuyaMarkdownQuietly(op.resultingMarkdown)
@@ -1716,6 +2166,7 @@ async function drainOpQueue() {
         }
       }
 
+      clearInsertSpacer()
       await nextTick()
       await waitForLayoutFrame()
       recordPendingChange(unitType, unitIdx, unitOldMd, unitMd, op.label)
@@ -1723,16 +2174,24 @@ async function drainOpQueue() {
 
       if (!animState.skipAll) {
         animState.phase = 'settled'
-        positionOverlayOnBlock(unitIdx, '已更新', '', false)
-        await sleep(remainingUnits > 0 ? 280 : 620)
+        positionOverlayOnBlock(
+          unitIdx,
+          '已更新',
+          '',
+          false,
+          unitType === 'delete_block' ? undefined : unitMd,
+          blocks.length
+        )
+        await sleep(remainingUnits > 0 ? 220 : 520)
       }
     }
   }
 
   if (animState.runId === myRunId) {
-    if (!animState.skipAll && animState.visible) {
+    clearInsertSpacer()
+    if (!animState.skipAll && animState.visible && store.pendingDocOps.length === 0) {
       animState.phase = 'fading'
-      await sleep(540)
+      await sleep(480)
     }
     if (animState.runId === myRunId) {
       animState.running = false
@@ -1741,7 +2200,11 @@ async function drainOpQueue() {
       animState.activeBlockIndex = -1
       animState.showStream = false
       animState.streamText = ''
+      animState.streamHtml = ''
       marginTick.value += 1
+      if (store.pendingDocOps.length > 0) {
+        void drainOpQueue()
+      }
     }
   }
 }
