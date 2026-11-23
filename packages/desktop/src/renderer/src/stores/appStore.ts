@@ -70,6 +70,7 @@ export interface QueuedBlockAnim {
 }
 
 export const useAppStore = defineStore('app', () => {
+  const initialized = ref(false)
   const workspaces = ref<WorkspaceInfo[]>([])
   const activeWorkspace = ref<WorkspaceInfo | null>(null)
   const files = ref<FileEntry[]>([])
@@ -247,22 +248,26 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function init() {
-    const defaultWs = await window.mark5.getDefaultWorkspace()
-    const recent = loadRecentWorkspaces()
+    try {
+      const defaultWs = await window.mark5.getDefaultWorkspace()
+      const recent = loadRecentWorkspaces()
 
-    window.mark5.onAgentEvent(handleAgentEvent)
-    window.mark5.onAgentDocOp(handleAgentDocOp)
+      window.mark5.onAgentEvent(handleAgentEvent)
+      window.mark5.onAgentDocOp(handleAgentDocOp)
 
-    if (defaultWs) {
-      const merged = [defaultWs, ...recent.filter((w) => w.rootPath !== defaultWs.rootPath)].slice(
-        0,
-        12
-      )
-      workspaces.value = merged
-      await switchWorkspace(defaultWs)
-    } else {
-      workspaces.value = recent
-      activeWorkspace.value = null
+      if (defaultWs) {
+        const merged = [defaultWs, ...recent.filter((w) => w.rootPath !== defaultWs.rootPath)].slice(
+          0,
+          12
+        )
+        workspaces.value = merged
+        await switchWorkspace(defaultWs)
+      } else {
+        workspaces.value = recent
+        activeWorkspace.value = null
+      }
+    } finally {
+      initialized.value = true
     }
   }
 
@@ -1155,6 +1160,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   return {
+    initialized,
     workspaces,
     activeWorkspace,
     files,

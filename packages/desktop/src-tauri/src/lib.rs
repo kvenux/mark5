@@ -782,6 +782,24 @@ fn attach_background_memory_trim(win: &tauri::WebviewWindow) {
     let _ = win;
 }
 
+fn schedule_window_show_fallback(win: &tauri::WebviewWindow) {
+    let win_c = win.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        if !win_c.is_visible().unwrap_or(true) {
+            let _ = win_c.show();
+            let _ = win_c.set_focus();
+        }
+    });
+}
+
+#[tauri::command]
+async fn show_current_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
 #[tauri::command]
 async fn open_new_window(
     app: AppHandle,
@@ -798,6 +816,7 @@ async fn open_new_window(
         .title("Mark 5")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1024.0, 680.0)
+        .visible(false)
         .background_color(bg)
         .additional_browser_args(WV2_LEAN_ARGS);
     if let Some(native_theme) = theme_native_opt(&effective_theme) {
@@ -807,6 +826,7 @@ async fn open_new_window(
         .build()
         .map_err(|e| format!("open_new_window failed: {e}"))?;
     attach_background_memory_trim(&win);
+    schedule_window_show_fallback(&win);
     Ok(())
 }
 
@@ -841,6 +861,7 @@ pub fn run() {
                 let _ = main_win.set_background_color(Some(theme_bg_color(&saved_theme)));
                 let _ = main_win.set_theme(theme_native_opt(&saved_theme));
                 attach_background_memory_trim(&main_win);
+                schedule_window_show_fallback(&main_win);
             }
 
             // Optional profiling harness hook: spawn N in-app windows deterministically
@@ -894,6 +915,7 @@ pub fn run() {
             list_engine_models,
             open_new_window,
             set_app_theme,
+            show_current_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Mark 5 Tauri app");

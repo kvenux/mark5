@@ -252,6 +252,7 @@ export interface Mark5API {
   // Multi-window & CLI diagnostics
   openNewWindow?: (theme?: AppTheme) => Promise<void>
   setAppTheme?: (theme: AppTheme) => Promise<void>
+  showCurrentWindow?: () => Promise<void>
   checkCliStatus?: (paths?: {
     agyPath?: string
     claudePath?: string

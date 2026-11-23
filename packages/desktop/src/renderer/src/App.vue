@@ -1,8 +1,11 @@
 <template>
   <div class="app-root">
+    <!-- Quiet boot blank canvas matching theme until initial workspace resolves (prevents WelcomeView flash) -->
+    <div v-if="!store.initialized" class="boot-blank" />
+
     <!-- Clean Welcome Launcher when no workspace is open yet -->
     <WelcomeView
-      v-if="!store.activeWorkspace"
+      v-else-if="!store.activeWorkspace"
       @open-settings="openSettings('appearance')"
     />
 
@@ -95,7 +98,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/appStore'
 import LeftSidebar from '@/components/LeftSidebar.vue'
 import ChatPane from '@/components/ChatPane.vue'
@@ -207,9 +210,13 @@ const onWindowKeydown = (e: KeyboardEvent) => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', onWindowKeydown)
-  store.init()
+  await store.init()
+  await nextTick()
+  requestAnimationFrame(() => {
+    void window.mark5.showCurrentWindow?.()
+  })
 })
 
 onUnmounted(() => {
@@ -224,6 +231,10 @@ onUnmounted(() => {
   width: 100vw;
   background: var(--bg-canvas);
   overflow: hidden;
+}
+.boot-blank {
+  flex: 1;
+  background: var(--bg-canvas);
 }
 .pane-resizer {
   width: 5px;

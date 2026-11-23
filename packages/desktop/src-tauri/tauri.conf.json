@@ -20,6 +20,7 @@
         "minHeight": 680,
         "resizable": true,
         "fullscreen": false,
+        "visible": false,
         "additionalBrowserArgs": "--disable-gpu --js-flags=--optimize-for-size --disable-features=BackForwardCache,Translate,MediaRouter,OptimizationHints,msWebOOUI,msPdfOOUI --disable-background-networking --disable-component-update --disable-extensions --disable-sync --disable-default-apps --no-pings --disable-speech-api --renderer-process-limit=1"
       }
     ],
