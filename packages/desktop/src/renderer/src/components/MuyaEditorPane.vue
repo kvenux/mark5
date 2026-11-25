@@ -21,6 +21,8 @@
             role="tab"
             :aria-selected="tab === store.activeDocRelPath"
             @click="store.openDocument(tab)"
+            @mousedown.middle.prevent
+            @auxclick.middle.prevent.stop="store.closeTab(tab)"
           >
             <span class="tab-label">{{ tab.replace(/\.md$/i, '') }}</span>
             <button
