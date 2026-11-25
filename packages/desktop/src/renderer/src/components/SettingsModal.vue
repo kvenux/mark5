@@ -591,16 +591,16 @@ onUnmounted(() => {
 }
 .s-textarea {
   width: 100%;
-  min-height: 180px;
-  padding: 10px 12px;
+  min-height: 240px;
+  padding: 12px 14px;
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   background: var(--bg-canvas);
   color: var(--ink-primary);
   font-family: inherit;
   font-size: 12.5px;
-  line-height: 1.65;
-  resize: vertical;
+  line-height: 1.68;
+  resize: none;
   outline: none;
 }
 .s-textarea:focus {
