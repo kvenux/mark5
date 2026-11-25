@@ -324,7 +324,7 @@ onUnmounted(() => {
   right: 20px;
   z-index: 80;
   background: var(--ink-primary);
-  color: #ffffff;
+  color: var(--bg-canvas);
   padding: 8px 14px;
   border-radius: 10px;
   font-size: 12.5px;
