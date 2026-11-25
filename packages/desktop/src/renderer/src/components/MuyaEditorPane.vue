@@ -2972,11 +2972,17 @@ function handleDocRenamed(oldRelPath: string, newRelPath: string) {
   }
 }
 
+const onWindowBlurOrUnload = () => {
+  void flushPendingSave()
+}
+
 onMounted(() => {
   store.registerEditorFlush(flushPendingSave)
   store.registerEditorRename(handleDocRenamed)
   document.addEventListener('click', onDocClick)
   window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('blur', onWindowBlurOrUnload)
+  window.addEventListener('beforeunload', onWindowBlurOrUnload)
   if (scrollEl.value) {
     scrollPaneWidth.value = scrollEl.value.clientWidth || 1000
     scrollResizeObs = new ResizeObserver(() => {
@@ -3002,6 +3008,8 @@ onUnmounted(() => {
   store.registerEditorRename(null)
   document.removeEventListener('click', onDocClick)
   window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('blur', onWindowBlurOrUnload)
+  window.removeEventListener('beforeunload', onWindowBlurOrUnload)
   if (scrollResizeObs) {
     scrollResizeObs.disconnect()
     scrollResizeObs = null
