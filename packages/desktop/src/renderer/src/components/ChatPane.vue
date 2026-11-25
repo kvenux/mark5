@@ -1707,13 +1707,14 @@ watch(
   font-size: 11.5px;
   font-weight: 500;
   color: var(--ink-body);
-  padding: 2px 6px;
+  padding: 2px 4px 2px 6px;
   border-radius: 6px;
   background: var(--bg-subtle);
   border: 1px solid var(--border-hairline);
   outline: none;
   cursor: pointer;
   flex-shrink: 0;
+  max-width: 74px;
 }
 .engine-select:hover {
   border-color: var(--border-soft);
@@ -1730,9 +1731,9 @@ watch(
 }
 .model-picker-wrap {
   position: relative;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: 150px;
+  max-width: 148px;
 }
 .model-chip {
   display: inline-flex;
@@ -1887,11 +1888,11 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  max-width: 100%;
+  max-width: 160px;
   overflow: hidden;
-  padding: 2px 7px;
+  padding: 2px 6px;
   border-radius: 6px;
   font-size: 11.5px;
   color: var(--ink-muted);
