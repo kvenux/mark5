@@ -1,7 +1,7 @@
 <template>
   <main class="doc-pane">
     <!-- Single Unified Document Tab Bar -->
-    <header class="doc-header" v-if="store.openTabs.length || (!canClose && !sidebarVisible)">
+    <header class="doc-header" v-if="store.openTabs.length || canClose || !sidebarVisible">
       <div class="doc-header-left">
         <button
           v-if="!canClose && !sidebarVisible"
