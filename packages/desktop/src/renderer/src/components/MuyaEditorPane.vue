@@ -2774,20 +2774,25 @@ function closeFindBar() {
 const onGlobalKeydown = (e: KeyboardEvent) => {
   const mod = e.ctrlKey || e.metaKey
   const key = e.key.toLowerCase()
+  const hasOpenModal = Boolean(
+    document.querySelector('.modal-backdrop, .settings-backdrop, .history-backdrop, [role="dialog"]')
+  )
   if (mod && !e.altKey && !e.shiftKey && key === 's') {
-    e.preventDefault()
-    void saveNow(true)
+    if (!hasOpenModal && store.activeDocRelPath) {
+      e.preventDefault()
+      void saveNow(true)
+    }
     return
   }
   if (mod && !e.altKey && !e.shiftKey && key === 'w') {
-    if (store.activeDocRelPath) {
+    if (!hasOpenModal && store.activeDocRelPath) {
       e.preventDefault()
       void store.closeTab(store.activeDocRelPath)
       return
     }
   }
   if (mod && !e.altKey && !e.shiftKey && key === 'f') {
-    if (store.activeDocRelPath && isMarkdownFile.value) {
+    if (!hasOpenModal && store.activeDocRelPath && isMarkdownFile.value) {
       e.preventDefault()
       openFindBar()
       return
@@ -2799,12 +2804,14 @@ const onGlobalKeydown = (e: KeyboardEvent) => {
     return
   }
 
-  // Global Undo / Redo for the active Markdown document (skip text inputs/textareas outside Muya)
+  // Global Undo / Redo for the active Markdown document (skip when empty state, modal open, or native input focused)
   if (
     !e.defaultPrevented &&
+    !hasOpenModal &&
     mod &&
     !e.altKey &&
     muyaInstance &&
+    Boolean(store.activeDocRelPath) &&
     isMarkdownFile.value &&
     (key === 'z' || key === 'y')
   ) {
