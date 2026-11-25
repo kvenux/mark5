@@ -613,12 +613,21 @@ function onDocClickForModelMenu(ev: MouseEvent) {
   }
 }
 
+function onWindowKeydownForModals(ev: KeyboardEvent) {
+  if (ev.key === 'Escape' && pastedModal.open) {
+    ev.preventDefault()
+    closePastedModal()
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', onDocClickForModelMenu)
+  window.addEventListener('keydown', onWindowKeydownForModals)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClickForModelMenu)
+  window.removeEventListener('keydown', onWindowKeydownForModals)
 })
 const contextDocRelPath = computed(
   () => store.activeDocRelPath || store.activeSession?.docRelPath || null
