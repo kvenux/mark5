@@ -224,7 +224,7 @@
               :class="{ active: activeMarginThreadId === group.thread.id }"
               :style="{ top: group.top + 'px' }"
               @click.stop="selectMarginThread(group.thread)"
-              @mouseenter="previewCommentAnchor(group.thread.blockIndex)"
+              @mouseenter="previewCommentAnchor(group.thread)"
               @mouseleave="clearCommentAnchorPreview"
             >
               <div class="mtc-messages">
@@ -656,13 +656,30 @@ const isCompactCommentRail = computed(
   () => scrollPaneWidth.value >= 560 && scrollPaneWidth.value < 860
 )
 
+function resolveThreadDomElement(
+  thread: Pick<CommentThread, 'blockIndex' | 'quote'>,
+  els?: HTMLElement[],
+  totalMdBlocks?: number
+): HTMLElement | null {
+  const list = els ?? getTopBlockElements()
+  if (list.length === 0) return null
+  const total = totalMdBlocks ?? Math.max(list.length, splitTopBlocks(store.markdown).length)
+  const domIdx = thread.quote
+    ? findDomBlockIndex(thread.quote, thread.blockIndex, list, total)
+    : -1
+  return domIdx >= 0
+    ? list[domIdx]
+    : list[Math.min(Math.max(0, thread.blockIndex), Math.max(0, list.length - 1))] || null
+}
+
 const marginThreadGroups = computed(() => {
   void marginTick.value
   const wrap = hostWrapEl.value
   const els = getTopBlockElements()
+  const totalMdBlocks = Math.max(els.length, splitTopBlocks(store.markdown).length)
   const openThreads = store.threads.filter((t) => !t.resolved)
   const raw = openThreads.map((thread, idx) => {
-    const el = els[Math.min(Math.max(0, thread.blockIndex), Math.max(0, els.length - 1))]
+    const el = resolveThreadDomElement(thread, els, totalMdBlocks)
     let top = 24 + idx * 44
     if (wrap && el) {
       top = Math.max(12, el.getBoundingClientRect().top - wrap.getBoundingClientRect().top + 2)
@@ -747,13 +764,12 @@ function selectMarginThread(thread: CommentThread) {
     activeMarginThreadId.value = thread.id
     marginReplyDraft.value = ''
   }
-  previewCommentAnchor(thread.blockIndex)
+  previewCommentAnchor(thread)
 }
 
-function previewCommentAnchor(blockIndex: number) {
+function previewCommentAnchor(thread: Pick<CommentThread, 'blockIndex' | 'quote'>) {
   const wrap = hostWrapEl.value
-  const els = getTopBlockElements()
-  const target = els[blockIndex]
+  const target = resolveThreadDomElement(thread)
   if (!wrap || !target) return
   const wRect = wrap.getBoundingClientRect()
   const tRect = target.getBoundingClientRect()
