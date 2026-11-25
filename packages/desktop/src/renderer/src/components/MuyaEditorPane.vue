@@ -2805,24 +2805,27 @@ const onGlobalKeydown = (e: KeyboardEvent) => {
         : e.key.toLowerCase()
   if (e.isComposing && !mod) return
   const hasOpenModal = Boolean(
-    document.querySelector('.modal-backdrop, .settings-backdrop, .history-backdrop, [role="dialog"]')
+    document.querySelector(
+      '.modal-mask, .settings-mask, .pasted-modal-mask, .modal-backdrop, [role="dialog"]'
+    )
   )
+  const isDocPaneVisible = Boolean(hostWrapEl.value && hostWrapEl.value.offsetParent !== null)
   if (mod && !e.altKey && !e.shiftKey && key === 's') {
-    if (!hasOpenModal && store.activeDocRelPath) {
+    if (!hasOpenModal && isDocPaneVisible && store.activeDocRelPath) {
       e.preventDefault()
       void saveNow(true)
     }
     return
   }
   if (mod && !e.altKey && !e.shiftKey && key === 'w') {
-    if (!hasOpenModal && store.activeDocRelPath) {
+    if (!hasOpenModal && isDocPaneVisible && store.activeDocRelPath) {
       e.preventDefault()
       void store.closeTab(store.activeDocRelPath)
       return
     }
   }
   if (mod && !e.altKey && !e.shiftKey && key === 'f') {
-    if (!hasOpenModal && store.activeDocRelPath && isMarkdownFile.value) {
+    if (!hasOpenModal && isDocPaneVisible && store.activeDocRelPath && isMarkdownFile.value) {
       e.preventDefault()
       openFindBar()
       return
@@ -2834,10 +2837,11 @@ const onGlobalKeydown = (e: KeyboardEvent) => {
     return
   }
 
-  // Global Undo / Redo for the active Markdown document (skip when empty state, modal open, or native input focused)
+  // Global Undo / Redo for the active Markdown document (skip when hidden, modal open, or native input focused)
   if (
     !e.defaultPrevented &&
     !hasOpenModal &&
+    isDocPaneVisible &&
     mod &&
     !e.altKey &&
     muyaInstance &&
