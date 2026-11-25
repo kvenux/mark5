@@ -747,9 +747,10 @@ button.btn-primary:hover {
 
 .drc-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 6px 10px;
   padding: 8px 10px 8px 12px;
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border-hairline);
@@ -785,6 +786,7 @@ button.btn-primary:hover {
   font-size: 12px;
   font-weight: 500;
   color: var(--ink-primary);
+  white-space: nowrap;
 }
 
 .drc-actions {
@@ -792,6 +794,7 @@ button.btn-primary:hover {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .drc-btn {
