@@ -2858,6 +2858,21 @@ const onGlobalKeydown = (e: KeyboardEvent) => {
     }
     return
   }
+  if (mod && !e.altKey && e.key === 'Tab') {
+    if (!hasOpenModal && isDocPaneVisible && store.openTabs.length > 1) {
+      e.preventDefault()
+      const curIdx = store.activeDocRelPath
+        ? store.openTabs.indexOf(store.activeDocRelPath)
+        : -1
+      const delta = e.shiftKey ? -1 : 1
+      const nextIdx =
+        curIdx >= 0
+          ? (curIdx + delta + store.openTabs.length) % store.openTabs.length
+          : 0
+      void store.openDocument(store.openTabs[nextIdx])
+      return
+    }
+  }
   if (mod && !e.altKey && !e.shiftKey && key === 'w') {
     if (!hasOpenModal && isDocPaneVisible && store.activeDocRelPath) {
       e.preventDefault()
