@@ -1208,7 +1208,7 @@ function positionDiffCard(ch: { blockIndex: number; newMarkdown?: string; oldMar
   if (!wrap || !target) return
   const wRect = wrap.getBoundingClientRect()
   const tRect = target.getBoundingClientRect()
-  const cardWidth = Math.min(Math.max(360, tRect.width + 20), wrap.clientWidth)
+  const cardWidth = Math.min(Math.max(260, tRect.width + 20), wrap.clientWidth)
   diffCardPos.left = Math.max(0, tRect.left - wRect.left - 10)
   diffCardPos.width = cardWidth
   // Anchor neatly below the focused paragraph so it never collides with headings above
@@ -1220,8 +1220,10 @@ function openDiffForChange(changeId: string) {
   if (idx < 0) return
   const ch = pendingChanges.value[idx]
   reviewPos.value = idx
-  activeDiffId.value = ch.id
   focusChangedBlock(ch)
+  // Compute final card geometry synchronously BEFORE showing the card so frame 1 never flashes at stale top=120
+  positionDiffCard(ch)
+  activeDiffId.value = ch.id
   nextTick(() => positionDiffCard(ch))
 }
 
