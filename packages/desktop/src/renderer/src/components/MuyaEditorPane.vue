@@ -789,11 +789,42 @@ function toggleCommentExpand(msgId: string) {
   })
 }
 
+function closeIncompleteInlineMd(raw: string): string {
+  let s = raw || ''
+  // Avoid flashing raw opening marker while streaming the first char of **bold** or `code`
+  if (/(?:^|[\s>（(【\[])\*$/.test(s)) {
+    s = s.slice(0, -1)
+  }
+  const boldCount = (s.match(/\*\*/g) || []).length
+  if (boldCount % 2 === 1) {
+    s = s.endsWith('**') ? s.slice(0, -2) : s + '**'
+  }
+  const strikeCount = (s.match(/~~/g) || []).length
+  if (strikeCount % 2 === 1) {
+    s = s.endsWith('~~') ? s.slice(0, -2) : s + '~~'
+  }
+  const codeCount = (s.match(/(?<!`)`(?!`)/g) || []).length
+  if (codeCount % 2 === 1) {
+    s = s.endsWith('`') ? s.slice(0, -1) : s + '`'
+  }
+  return s
+}
+
 function renderStreamMd(mdText: string): string {
-  const html = commentMd.render(mdText || '')
+  const balanced = closeIncompleteInlineMd(mdText || '')
+  const html = commentMd.render(balanced)
   const safe = DOMPurify.sanitize(html)
-  // Inject inline blinking agent caret right before the last closing block tag so it flows naturally with formatted text
+  // Inject inline blinking agent caret inside the last leaf block tag (never outside </p> before </blockquote>)
   const caretHtml = '<span class="agent-caret"></span>'
+  const leafCloseRe = /<\/(?:p|li|h[1-6]|pre|code|td|th)>/gi
+  let lastMatchIdx = -1
+  let m: RegExpExecArray | null
+  while ((m = leafCloseRe.exec(safe)) !== null) {
+    lastMatchIdx = m.index
+  }
+  if (lastMatchIdx > 0) {
+    return safe.slice(0, lastMatchIdx) + caretHtml + safe.slice(lastMatchIdx)
+  }
   const idx = safe.lastIndexOf('</')
   if (idx > 0) {
     return safe.slice(0, idx) + caretHtml + safe.slice(idx)
