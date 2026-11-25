@@ -1593,16 +1593,26 @@ watch(
     ) as HTMLElement[]
     if (!headings.length) return
 
-    const stripMdPrefix = (s: string) => s.replace(/^#+\s*/, '').trim()
+    const normalizeHeading = (s: string) =>
+      s
+        .replace(/^#+\s*/, '')
+        .replace(/[`*_~]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    const targetNorm = normalizeHeading(req.text || '')
     let match: HTMLElement | undefined
     if (req.index >= 0 && req.index < headings.length) {
       const candidate = headings[req.index]
-      if (!req.text || stripMdPrefix(candidate.textContent || '') === req.text.trim()) {
+      if (
+        headings.length === store.toc.length ||
+        !targetNorm ||
+        normalizeHeading(candidate.textContent || '') === targetNorm
+      ) {
         match = candidate
       }
     }
-    if (!match && req.text) {
-      match = headings.find((h) => stripMdPrefix(h.textContent || '') === req.text.trim())
+    if (!match && targetNorm) {
+      match = headings.find((h) => normalizeHeading(h.textContent || '') === targetNorm)
     }
     if (!match) return
 
