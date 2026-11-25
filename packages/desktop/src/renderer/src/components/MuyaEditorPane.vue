@@ -20,6 +20,7 @@
             :class="{ active: tab === store.activeDocRelPath }"
             role="tab"
             :aria-selected="tab === store.activeDocRelPath"
+            :title="tab"
             @click="store.openDocument(tab)"
             @mousedown.middle.prevent
             @auxclick.middle.prevent.stop="store.closeTab(tab)"
@@ -3153,6 +3154,14 @@ onUnmounted(() => {
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
+  flex-shrink: 0;
+  max-width: 210px;
+}
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 172px;
 }
 .tab-pill:hover {
   background: var(--bg-hover);
