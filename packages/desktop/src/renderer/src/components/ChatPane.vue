@@ -1962,9 +1962,12 @@ watch(
   border-color: var(--ink-faint);
 }
 .pasted-card.in-msg {
-  width: 170px;
+  width: 178px;
   height: 98px;
   margin-bottom: 4px;
+}
+.pasted-card.in-msg .pasted-card-preview {
+  -webkit-line-clamp: 3;
 }
 .pasted-card-preview {
   font-size: 11px;
