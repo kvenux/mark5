@@ -3635,7 +3635,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .find-input {
-  width: 190px;
+  width: 156px;
   border: none;
   outline: none;
   background: transparent;
@@ -3653,10 +3653,12 @@ onUnmounted(() => {
 .find-nav-btn {
   width: 24px;
   height: 24px;
+  padding: 0;
+  flex-shrink: 0;
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--ink-secondary, var(--ink-primary));
+  color: var(--ink-body);
   display: inline-flex;
   align-items: center;
   justify-content: center;
