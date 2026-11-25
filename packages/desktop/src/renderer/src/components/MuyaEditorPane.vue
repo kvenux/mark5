@@ -2637,6 +2637,12 @@ async function submitFloatComment() {
 
 function openHistory() {
   menuOpen.value = false
+  if (
+    document.activeElement instanceof HTMLElement &&
+    muyaContainerEl.value?.contains(document.activeElement)
+  ) {
+    document.activeElement.blur()
+  }
   emit('open-history')
 }
 
@@ -2896,24 +2902,28 @@ const onGlobalKeydown = (e: KeyboardEvent) => {
   // Global Undo / Redo for the active Markdown document (skip when hidden, modal open, or native input focused)
   if (
     !e.defaultPrevented &&
-    !hasOpenModal &&
-    isDocPaneVisible &&
     mod &&
     !e.altKey &&
     muyaInstance &&
-    Boolean(store.activeDocRelPath) &&
-    isMarkdownFile.value &&
     (key === 'z' || key === 'y')
   ) {
     const active = document.activeElement as HTMLElement | null
+    const focusInMuya = Boolean(active && muyaContainerEl.value?.contains(active))
     const inNativeInput = Boolean(
       active &&
         (active.tagName === 'INPUT' ||
           active.tagName === 'TEXTAREA' ||
           active.tagName === 'SELECT' ||
-          (active.isContentEditable &&
-            (!muyaContainerEl.value || !muyaContainerEl.value.contains(active))))
+          (active.isContentEditable && !focusInMuya))
     )
+    if (hasOpenModal || !isDocPaneVisible || !store.activeDocRelPath || !isMarkdownFile.value) {
+      // Block Chromium's document-level contenteditable undo/redo from mutating Muya behind a modal/hidden view,
+      // while still allowing native undo/redo inside modal inputs/textareas.
+      if (!inNativeInput) {
+        e.preventDefault()
+      }
+      return
+    }
     if (!inNativeInput) {
       if (key === 'z' && !e.shiftKey) {
         e.preventDefault()
