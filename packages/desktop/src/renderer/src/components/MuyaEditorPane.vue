@@ -2643,34 +2643,51 @@ function openHistory() {
 async function doExport(format: 'md' | 'html' | 'pdf') {
   menuOpen.value = false
   if (!store.activeWorkspace || !store.activeDocRelPath) return
-  const md = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
-  let html = ''
-  if (format === 'html' || format === 'pdf') {
-    const converter = new MarkdownToHtml(md)
-    html = await converter.generate()
+  try {
+    const md = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
+    let html = ''
+    if (format === 'html' || format === 'pdf') {
+      const converter = new MarkdownToHtml(md)
+      html = await converter.generate()
+    }
+    const res = await window.mark5.exportDocument({
+      rootPath: store.activeWorkspace.rootPath,
+      docRelPath: store.activeDocRelPath,
+      format,
+      markdown: md,
+      html
+    })
+    if (res.ok && res.outPath) {
+      store.showToast(`已导出：${res.outPath}`)
+    } else if (res.message) {
+      store.showToast(`导出失败：${res.message}`)
+    }
+  } catch (err) {
+    store.showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`)
   }
-  const res = await window.mark5.exportDocument({
-    rootPath: store.activeWorkspace.rootPath,
-    docRelPath: store.activeDocRelPath,
-    format,
-    markdown: md,
-    html
-  })
-  if (res.ok) store.showToast(`已导出：${res.outPath}`)
 }
 
 async function copyRichHtml() {
   menuOpen.value = false
   const md = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
-  const converter = new MarkdownToHtml(md)
-  const html = await converter.generate()
-  await navigator.clipboard.write([
-    new ClipboardItem({
-      'text/html': new Blob([html], { type: 'text/html' }),
-      'text/plain': new Blob([md], { type: 'text/plain' })
-    })
-  ])
-  store.showToast('已复制富文本')
+  try {
+    const converter = new MarkdownToHtml(md)
+    const html = await converter.generate()
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([md], { type: 'text/plain' })
+      })
+    ])
+    store.showToast('已复制富文本')
+  } catch {
+    try {
+      await navigator.clipboard.writeText(md)
+      store.showToast('已复制纯文本 Markdown（富文本剪贴板不可用）')
+    } catch (err) {
+      store.showToast(`复制失败：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
 }
 
 function flashSavedHint() {
