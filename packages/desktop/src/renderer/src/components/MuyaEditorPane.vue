@@ -1416,6 +1416,20 @@ function mountMuya(initialMd: string) {
     }, 300)
     refreshToc()
     marginTick.value += 1
+    if (findBar.open && findBar.query && muyaInstance) {
+      try {
+        const res = muyaInstance.search(findBar.query, {
+          isCaseSensitive: false,
+          isWholeWord: false,
+          isRegexp: false,
+          selectHighlight: false
+        })
+        findBar.total = res.matches.length
+        findBar.index = res.index
+      } catch {
+        // ignore transient search sync errors while typing
+      }
+    }
   })
 
   refreshToc()
