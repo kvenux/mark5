@@ -7,7 +7,9 @@
     "dev": "pnpm --filter mark5-desktop tauri:dev",
     "build": "pnpm --filter mark5-desktop tauri:build",
     "build:ui": "pnpm --filter mark5-desktop build",
-    "typecheck": "pnpm --filter @muyajs/core build:types && pnpm --filter mark5-desktop typecheck"
+    "typecheck": "pnpm --filter @muyajs/core build:types && pnpm --filter mark5-desktop typecheck",
+    "test:gui": "node tests/gui/run-gui-tests.mjs",
+    "test:gui:build": "node tests/gui/run-gui-tests.mjs --build"
   },
   "packageManager": "pnpm@10.33.0"
 }

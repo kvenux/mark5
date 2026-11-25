@@ -11,3 +11,4 @@ packages/desktop/src-tauri/gen/
 scripts/.bench-ws/
 scripts/.bench-wv2/
 scripts/.mem-profile-history.json
+tests/gui/artifacts/
