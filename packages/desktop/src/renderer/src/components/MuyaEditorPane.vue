@@ -2796,7 +2796,14 @@ function closeFindBar() {
 
 const onGlobalKeydown = (e: KeyboardEvent) => {
   const mod = e.ctrlKey || e.metaKey
-  const key = e.key.toLowerCase()
+  // On Windows Chinese IME, Ctrl+Z/Y/S/F/W can report e.key === 'Process' while e.code is 'KeyZ', etc.
+  const key =
+    e.key.length === 1
+      ? e.key.toLowerCase()
+      : e.code && e.code.startsWith('Key')
+        ? e.code.slice(3).toLowerCase()
+        : e.key.toLowerCase()
+  if (e.isComposing && !mod) return
   const hasOpenModal = Boolean(
     document.querySelector('.modal-backdrop, .settings-backdrop, .history-backdrop, [role="dialog"]')
   )
