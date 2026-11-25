@@ -3142,6 +3142,10 @@ onUnmounted(() => {
   gap: 4px;
   overflow-x: auto;
   min-width: 0;
+  scrollbar-width: none;
+}
+.tab-pills::-webkit-scrollbar {
+  display: none;
 }
 .tab-pill {
   display: inline-flex;
