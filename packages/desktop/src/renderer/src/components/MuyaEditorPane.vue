@@ -1460,14 +1460,26 @@ function setMuyaMarkdownQuietly(md: string, preserveUndo = false) {
   marginTick.value += 1
 }
 
+const MAX_DOC_CACHE_ENTRIES = 30
+
+function touchCacheEntry<T>(map: Map<string, T>, key: string, value: T) {
+  if (map.has(key)) map.delete(key)
+  map.set(key, value)
+  while (map.size > MAX_DOC_CACHE_ENTRIES) {
+    const oldest = map.keys().next().value
+    if (oldest !== undefined) map.delete(oldest)
+    else break
+  }
+}
+
 function saveCurrentDocHistory() {
   if (scrollEl.value && lastLoadedDocKey) {
-    docScrollMap.set(lastLoadedDocKey, scrollEl.value.scrollTop)
+    touchCacheEntry(docScrollMap, lastLoadedDocKey, scrollEl.value.scrollTop)
   }
   if (!muyaInstance || !lastLoadedDocKey) return
   try {
     muyaInstance.flush()
-    docHistoryCache.set(lastLoadedDocKey, {
+    touchCacheEntry(docHistoryCache, lastLoadedDocKey, {
       history: muyaInstance.getHistory(),
       markdown: muyaInstance.getMarkdown()
     })
@@ -1475,6 +1487,17 @@ function saveCurrentDocHistory() {
     // ignore if editor is torn down
   }
 }
+
+watch(
+  () => store.activeWorkspace?.rootPath,
+  (nextRoot, prevRoot) => {
+    if (prevRoot && nextRoot !== prevRoot) {
+      docHistoryCache.clear()
+      docScrollMap.clear()
+      lastLoadedDocKey = null
+    }
+  }
+)
 
 function restoreDocScroll(docKey: string | null) {
   const targetTop = docKey ? docScrollMap.get(docKey) ?? 0 : 0
@@ -3518,9 +3541,9 @@ onUnmounted(() => {
   gap: 6px;
   padding: 6px 8px 6px 10px;
   border-radius: 10px;
-  background: var(--bg-elevated, var(--bg-canvas));
-  border: 1px solid var(--border-subtle, var(--border-hairline));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  background: var(--float-bg-color);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-pop);
 }
 .find-icon {
   color: var(--ink-muted);
