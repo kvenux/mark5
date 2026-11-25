@@ -2147,7 +2147,8 @@ async function drainOpQueue() {
           const syncModifyHeight = async () => {
             await nextTick()
             if (streamPreviewEl.value) {
-              const neededH = Math.max(36, streamPreviewEl.value.offsetHeight + 12)
+              // Keep overlay >= modifyOrigBoxH during editing so old paragraph lines underneath never peek out
+              const neededH = Math.max(36, modifyOrigBoxH, streamPreviewEl.value.offsetHeight + 12)
               animState.boxHeight = neededH
               if (modifyAnchorEl) {
                 setInsertSpacer(modifyAnchorEl, Math.max(0, neededH - modifyOrigBoxH))
