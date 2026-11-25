@@ -230,7 +230,11 @@
             fading: animState.phase === 'fading'
           }"
           :style="{
-            transform: `translate(${animState.cursorX}px, ${animState.cursorY}px)`
+            top: animState.boxTop + 'px',
+            left: animState.boxLeft + animState.boxWidth - 8 + 'px',
+            width: 'max-content',
+            whiteSpace: 'nowrap',
+            transform: 'translate(-100%, -55%)'
           }"
         >
           <div class="agent-cursor-pill">
