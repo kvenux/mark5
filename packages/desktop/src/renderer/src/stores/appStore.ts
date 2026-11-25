@@ -347,9 +347,14 @@ export const useAppStore = defineStore('app', () => {
   }
 
   let editorFlushHandler: (() => Promise<void>) | null = null
+  let editorRenameHandler: ((oldRelPath: string, newRelPath: string) => void) | null = null
 
   function registerEditorFlush(fn: (() => Promise<void>) | null) {
     editorFlushHandler = fn
+  }
+
+  function registerEditorRename(fn: ((oldRelPath: string, newRelPath: string) => void) | null) {
+    editorRenameHandler = fn
   }
 
   async function flushPendingEditorSave() {
@@ -531,6 +536,7 @@ export const useAppStore = defineStore('app', () => {
   async function renameFileOrDir(oldRelPath: string, newName: string) {
     if (!activeWorkspace.value || !window.mark5.renameEntry) return
     try {
+      await flushPendingEditorSave()
       const newRelPath = await window.mark5.renameEntry(
         activeWorkspace.value.rootPath,
         oldRelPath,
@@ -543,9 +549,11 @@ export const useAppStore = defineStore('app', () => {
         if (p.startsWith(oldRelPath + '/')) return newRelPath + p.slice(oldRelPath.length)
         return p
       }
+      editorRenameHandler?.(oldRelPath, newRelPath)
       openTabs.value = openTabs.value.map(rewrite)
       if (activeDocRelPath.value) {
         activeDocRelPath.value = rewrite(activeDocRelPath.value)
+        syncWindowDirname(activeWorkspace.value.rootPath, activeDocRelPath.value)
       }
       for (const s of sessions.value) {
         if (s.docRelPath) s.docRelPath = rewrite(s.docRelPath)
@@ -1248,6 +1256,7 @@ export const useAppStore = defineStore('app', () => {
     createSubFolder,
     revealInExplorer,
     registerEditorFlush,
+    registerEditorRename,
     flushPendingEditorSave,
     onEditorMarkdownChanged,
     appendToCurrentDocument,

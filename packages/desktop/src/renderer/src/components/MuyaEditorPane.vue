@@ -2906,8 +2906,41 @@ const onDocClick = (e: MouseEvent) => {
 
 let scrollResizeObs: ResizeObserver | null = null
 
+function handleDocRenamed(oldRelPath: string, newRelPath: string) {
+  const root = store.activeWorkspace?.rootPath
+  if (!root) return
+  const prefix = `${root}::`
+  const rewriteKey = (k: string): string => {
+    if (!k.startsWith(prefix)) return k
+    const rel = k.slice(prefix.length)
+    if (rel === oldRelPath) return `${prefix}${newRelPath}`
+    if (rel.startsWith(oldRelPath + '/')) {
+      return `${prefix}${newRelPath}${rel.slice(oldRelPath.length)}`
+    }
+    return k
+  }
+  for (const [k, v] of Array.from(docHistoryCache.entries())) {
+    const nextK = rewriteKey(k)
+    if (nextK !== k) {
+      docHistoryCache.delete(k)
+      docHistoryCache.set(nextK, v)
+    }
+  }
+  for (const [k, v] of Array.from(docScrollMap.entries())) {
+    const nextK = rewriteKey(k)
+    if (nextK !== k) {
+      docScrollMap.delete(k)
+      docScrollMap.set(nextK, v)
+    }
+  }
+  if (lastLoadedDocKey) {
+    lastLoadedDocKey = rewriteKey(lastLoadedDocKey)
+  }
+}
+
 onMounted(() => {
   store.registerEditorFlush(flushPendingSave)
+  store.registerEditorRename(handleDocRenamed)
   document.addEventListener('click', onDocClick)
   window.addEventListener('keydown', onGlobalKeydown)
   if (scrollEl.value) {
@@ -2932,6 +2965,7 @@ onMounted(() => {
 onUnmounted(() => {
   void flushPendingSave()
   store.registerEditorFlush(null)
+  store.registerEditorRename(null)
   document.removeEventListener('click', onDocClick)
   window.removeEventListener('keydown', onGlobalKeydown)
   if (scrollResizeObs) {
