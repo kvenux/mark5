@@ -2520,12 +2520,14 @@ function applyInlineFormat(
 ) {
   if (!muyaInstance) return
   try {
-    const editor = muyaInstance.editor as unknown as {
-      selection?: { getSelection?: () => { anchorBlock?: { format?: (t: string) => void } } | null }
-      activeContentBlock?: { format?: (t: string) => void }
+    if (typeof muyaInstance.format === 'function') {
+      muyaInstance.format(type)
+      return
     }
-    const sel = editor.selection?.getSelection?.()
-    const block = sel?.anchorBlock || editor.activeContentBlock
+    const sel = muyaInstance.editor.selection.getTextSelection()
+    const block = (sel?.anchor?.block || muyaInstance.editor.activeContentBlock) as unknown as {
+      format?: (t: string) => void
+    } | null
     if (block && typeof block.format === 'function') {
       block.format(type)
     }
