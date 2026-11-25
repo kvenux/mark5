@@ -201,6 +201,11 @@ watch(
 )
 
 const onWindowKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && showHistory.value) {
+    e.preventDefault()
+    showHistory.value = false
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
     e.preventDefault()
     void window.mark5.openNewWindow?.(store.settings.theme)
