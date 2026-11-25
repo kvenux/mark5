@@ -64,6 +64,44 @@
       </div>
     </header>
 
+    <!-- Floating In-Document Find Bar (Ctrl+F) -->
+    <div v-if="findBar.open" class="find-bar" @click.stop>
+      <Search :size="14" :stroke-width="1.8" class="find-icon" />
+      <input
+        ref="findInputEl"
+        v-model="findBar.query"
+        class="find-input"
+        type="text"
+        placeholder="在文档中查找…"
+        @input="runDocumentFind"
+        @keydown.enter.exact.prevent="stepDocumentFind('next')"
+        @keydown.enter.shift.prevent="stepDocumentFind('previous')"
+        @keydown.escape.prevent="closeFindBar"
+      />
+      <span v-if="findBar.query" class="find-count">
+        {{ findBar.total > 0 ? `${findBar.index + 1} / ${findBar.total}` : '无结果' }}
+      </span>
+      <button
+        class="find-nav-btn"
+        title="上一个匹配 (Shift+Enter)"
+        :disabled="findBar.total === 0"
+        @click="stepDocumentFind('previous')"
+      >
+        <ChevronUp :size="14" :stroke-width="1.9" />
+      </button>
+      <button
+        class="find-nav-btn"
+        title="下一个匹配 (Enter)"
+        :disabled="findBar.total === 0"
+        @click="stepDocumentFind('next')"
+      >
+        <ChevronDown :size="14" :stroke-width="1.9" />
+      </button>
+      <button class="find-nav-btn" title="关闭查找 (Esc)" @click="closeFindBar">
+        <X :size="14" :stroke-width="1.9" />
+      </button>
+    </div>
+
     <!-- Clean Empty State -->
     <div v-if="!store.activeDocRelPath" class="empty-doc">
       <button class="btn-outline" @click="createBlankDoc">新建文档</button>
@@ -523,8 +561,10 @@ import DOMPurify from 'dompurify'
 import {
   Bold,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Code,
   Highlighter,
   Italic,
@@ -536,6 +576,7 @@ import {
   Quote,
   RemoveFormatting,
   RotateCcw,
+  Search,
   Strikethrough,
   Underline,
   X
@@ -582,6 +623,14 @@ const hostWrapEl = ref<HTMLElement | null>(null)
 const muyaContainerEl = ref<HTMLElement | null>(null)
 const streamPreviewEl = ref<HTMLElement | null>(null)
 const floatInputEl = ref<HTMLTextAreaElement | null>(null)
+const findInputEl = ref<HTMLInputElement | null>(null)
+
+const findBar = reactive({
+  open: false,
+  query: '',
+  index: -1,
+  total: 0
+})
 
 const menuOpen = ref(false)
 const saveHint = ref('')
@@ -1434,6 +1483,9 @@ watch(
     const isSameDoc = Boolean(newKey && newKey === lastLoadedDocKey)
     if (!isSameDoc) {
       saveCurrentDocHistory()
+      if (findBar.open) {
+        closeFindBar()
+      }
     }
     if (!newPath) {
       lastLoadedDocKey = null
@@ -2617,12 +2669,116 @@ async function saveNow(showFeedback = false) {
   }
 }
 
+function scrollActiveFindMatchIntoView() {
+  nextTick(() => {
+    const container = muyaContainerEl.value
+    if (!container) return
+    const active =
+      (container.querySelector('.mu-highlight') as HTMLElement | null) ||
+      (container.querySelector('.mu-selection') as HTMLElement | null)
+    if (active) {
+      active.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  })
+}
+
+function runDocumentFind() {
+  if (!muyaInstance) {
+    findBar.index = -1
+    findBar.total = 0
+    return
+  }
+  const q = findBar.query
+  if (!q) {
+    muyaInstance.search('')
+    findBar.index = -1
+    findBar.total = 0
+    return
+  }
+  const res = muyaInstance.search(q, {
+    isCaseSensitive: false,
+    isWholeWord: false,
+    isRegexp: false,
+    selectHighlight: true
+  })
+  findBar.total = res.matches.length
+  findBar.index = res.index
+  if (res.matches.length > 0) {
+    scrollActiveFindMatchIntoView()
+  }
+}
+
+function stepDocumentFind(action: 'previous' | 'next') {
+  if (!muyaInstance || !findBar.query) return
+  const res = muyaInstance.find(action)
+  findBar.total = res.matches.length
+  findBar.index = res.index
+  if (res.matches.length > 0) {
+    scrollActiveFindMatchIntoView()
+  }
+}
+
+function openFindBar() {
+  if (!store.activeDocRelPath || !isMarkdownFile.value) return
+  const sel = window.getSelection()
+  if (
+    sel &&
+    !sel.isCollapsed &&
+    muyaContainerEl.value &&
+    sel.anchorNode &&
+    muyaContainerEl.value.contains(sel.anchorNode)
+  ) {
+    const selected = sel.toString().trim()
+    if (selected && !selected.includes('\n') && selected.length <= 80) {
+      findBar.query = selected
+    }
+  }
+  findBar.open = true
+  nextTick(() => {
+    findInputEl.value?.focus()
+    findInputEl.value?.select()
+    if (findBar.query) {
+      runDocumentFind()
+    }
+  })
+}
+
+function closeFindBar() {
+  findBar.open = false
+  findBar.index = -1
+  findBar.total = 0
+  if (muyaInstance) {
+    try {
+      muyaInstance.search('')
+    } catch {}
+  }
+}
+
 const onGlobalKeydown = (e: KeyboardEvent) => {
   const mod = e.ctrlKey || e.metaKey
   const key = e.key.toLowerCase()
   if (mod && !e.altKey && !e.shiftKey && key === 's') {
     e.preventDefault()
     void saveNow(true)
+    return
+  }
+  if (mod && !e.altKey && !e.shiftKey && key === 'w') {
+    if (store.activeDocRelPath) {
+      e.preventDefault()
+      void store.closeTab(store.activeDocRelPath)
+      return
+    }
+  }
+  if (mod && !e.altKey && !e.shiftKey && key === 'f') {
+    if (store.activeDocRelPath && isMarkdownFile.value) {
+      e.preventDefault()
+      openFindBar()
+      return
+    }
+  }
+  if (key === 'escape' && findBar.open) {
+    e.preventDefault()
+    closeFindBar()
     return
   }
 
@@ -3293,5 +3449,59 @@ onUnmounted(() => {
 .sel-btn:hover:not(:disabled) .sel-tip {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+.find-bar {
+  position: absolute;
+  top: 56px;
+  right: 20px;
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 10px;
+  background: var(--bg-elevated, var(--bg-canvas));
+  border: 1px solid var(--border-subtle, var(--border-hairline));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+.find-icon {
+  color: var(--ink-muted);
+  flex-shrink: 0;
+}
+.find-input {
+  width: 190px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.find-count {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+.find-nav-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-secondary, var(--ink-primary));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.find-nav-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--ink-primary);
+}
+.find-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 </style>
