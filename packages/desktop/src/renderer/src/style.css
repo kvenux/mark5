@@ -981,3 +981,53 @@ button.btn-primary:hover {
   color: var(--ink-primary);
   box-shadow: 0 0 0 1.5px var(--accent);
 }
+
+/* High-contrast Prism & YAML front-matter syntax palette for dark theme */
+[data-theme='dark'] .mu-container .token.comment,
+[data-theme='dark'] .mu-container .token.prolog,
+[data-theme='dark'] .mu-container .token.doctype,
+[data-theme='dark'] .mu-container .token.cdata {
+  color: #7f849c;
+}
+[data-theme='dark'] .mu-container .token.punctuation {
+  color: #a6adc8;
+}
+[data-theme='dark'] .mu-container .token.property,
+[data-theme='dark'] .mu-container .token.tag,
+[data-theme='dark'] .mu-container .token.boolean,
+[data-theme='dark'] .mu-container .token.number,
+[data-theme='dark'] .mu-container .token.constant,
+[data-theme='dark'] .mu-container .token.symbol,
+[data-theme='dark'] .mu-container .token.deleted,
+[data-theme='dark'] .mu-container .token.datetime {
+  color: #fab387;
+}
+[data-theme='dark'] .mu-container .token.selector,
+[data-theme='dark'] .mu-container .token.attr-name,
+[data-theme='dark'] .mu-container .token.string,
+[data-theme='dark'] .mu-container .token.char,
+[data-theme='dark'] .mu-container .token.builtin,
+[data-theme='dark'] .mu-container .token.inserted {
+  color: #a6e3a1;
+}
+[data-theme='dark'] .mu-container .token.operator,
+[data-theme='dark'] .mu-container .token.entity,
+[data-theme='dark'] .mu-container .token.url {
+  color: #89dceb;
+  background: transparent;
+}
+[data-theme='dark'] .mu-container .token.atrule,
+[data-theme='dark'] .mu-container .token.attr-value,
+[data-theme='dark'] .mu-container .token.keyword,
+[data-theme='dark'] .mu-container .token.key {
+  color: #89b4fa;
+}
+[data-theme='dark'] .mu-container .token.function,
+[data-theme='dark'] .mu-container .token.class-name {
+  color: #f9e2af;
+}
+[data-theme='dark'] .mu-container .token.regex,
+[data-theme='dark'] .mu-container .token.important,
+[data-theme='dark'] .mu-container .token.variable {
+  color: #cba6f7;
+}
