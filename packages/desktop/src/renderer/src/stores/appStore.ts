@@ -343,7 +343,20 @@ export const useAppStore = defineStore('app', () => {
     return null
   }
 
+  let editorFlushHandler: (() => Promise<void>) | null = null
+
+  function registerEditorFlush(fn: (() => Promise<void>) | null) {
+    editorFlushHandler = fn
+  }
+
+  async function flushPendingEditorSave() {
+    if (editorFlushHandler) {
+      await editorFlushHandler()
+    }
+  }
+
   async function switchWorkspace(ws: WorkspaceInfo) {
+    await flushPendingEditorSave()
     clearEditorState()
     activeWorkspace.value = ws
     persistWorkspaceHistory(ws)
@@ -476,6 +489,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function openDocument(relPath: string) {
     if (!activeWorkspace.value) return
+    await flushPendingEditorSave()
     const [content, docThreads, docHistory] = await Promise.all([
       window.mark5.readMarkdownFile(activeWorkspace.value.rootPath, relPath),
       window.mark5.listThreads(activeWorkspace.value.rootPath, relPath),
@@ -495,6 +509,7 @@ export const useAppStore = defineStore('app', () => {
   async function closeTab(relPath: string) {
     const idx = openTabs.value.indexOf(relPath)
     if (idx === -1) return
+    await flushPendingEditorSave()
     openTabs.value.splice(idx, 1)
     if (activeDocRelPath.value === relPath) {
       const next = openTabs.value[Math.min(idx, openTabs.value.length - 1)]
@@ -592,20 +607,27 @@ export const useAppStore = defineStore('app', () => {
     await window.mark5.revealInExplorer(activeWorkspace.value.rootPath, relPath)
   }
 
-  async function onEditorMarkdownChanged(newMd: string, saveToDisk = true) {
-    markdown.value = newMd
-    if (!activeWorkspace.value || !activeDocRelPath.value) return
+  async function onEditorMarkdownChanged(
+    newMd: string,
+    saveToDisk = true,
+    target?: { rootPath?: string; docRelPath?: string }
+  ) {
+    const rootPath = target?.rootPath ?? activeWorkspace.value?.rootPath
+    const docRelPath = target?.docRelPath ?? activeDocRelPath.value
+    if (!rootPath || !docRelPath) return
+    if (
+      activeWorkspace.value?.rootPath === rootPath &&
+      activeDocRelPath.value === docRelPath
+    ) {
+      markdown.value = newMd
+    }
     window.mark5.syncLiveDocument({
-      rootPath: activeWorkspace.value.rootPath,
-      docRelPath: activeDocRelPath.value,
+      rootPath,
+      docRelPath,
       markdown: newMd
     })
     if (saveToDisk) {
-      await window.mark5.writeMarkdownFile(
-        activeWorkspace.value.rootPath,
-        activeDocRelPath.value,
-        newMd
-      )
+      await window.mark5.writeMarkdownFile(rootPath, docRelPath, newMd)
     }
   }
 
@@ -1218,6 +1240,8 @@ export const useAppStore = defineStore('app', () => {
     createDocInFolder,
     createSubFolder,
     revealInExplorer,
+    registerEditorFlush,
+    flushPendingEditorSave,
     onEditorMarkdownChanged,
     appendToCurrentDocument,
     sendChatPrompt,

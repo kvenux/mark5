@@ -587,6 +587,7 @@ const menuOpen = ref(false)
 const saveHint = ref('')
 let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let saveHintTimer: ReturnType<typeof setTimeout> | null = null
+let pendingSave: { rootPath: string; docRelPath: string; markdown: string } | null = null
 let muyaInstance: Muya | null = null
 let suppressMuyaChange = false
 let pluginsRegistered = false
@@ -1269,14 +1270,20 @@ function mountMuya(initialMd: string) {
 
   muyaInstance.on('json-change', () => {
     if (suppressMuyaChange || !muyaInstance) return
+    const targetRoot = store.activeWorkspace?.rootPath
+    const targetRel = store.activeDocRelPath
+    if (!targetRoot || !targetRel) return
     const md = muyaInstance.getMarkdown()
-    // Sync in-memory live doc immediately, debounce disk write (300ms) to avoid concurrent writeFile storms
-    store.onEditorMarkdownChanged(md, false)
+    // Sync in-memory live doc immediately, debounce disk write (300ms) bound to the edited doc
+    void store.onEditorMarkdownChanged(md, false, {
+      rootPath: targetRoot,
+      docRelPath: targetRel
+    })
+    pendingSave = { rootPath: targetRoot, docRelPath: targetRel, markdown: md }
     saveHint.value = '保存中...'
     if (saveDebounceTimer) clearTimeout(saveDebounceTimer)
-    saveDebounceTimer = setTimeout(async () => {
-      await store.onEditorMarkdownChanged(md, true)
-      flashSavedHint()
+    saveDebounceTimer = setTimeout(() => {
+      void flushPendingSave()
     }, 300)
     refreshToc()
     marginTick.value += 1
@@ -2431,18 +2438,48 @@ function flashSavedHint() {
   }, 1800)
 }
 
-async function saveNow(showFeedback = false) {
-  menuOpen.value = false
-  if (!store.activeWorkspace || !store.activeDocRelPath) return
+async function flushPendingSave() {
   if (saveDebounceTimer) {
     clearTimeout(saveDebounceTimer)
     saveDebounceTimer = null
   }
+  const item = pendingSave
+  if (!item) return
+  pendingSave = null
+  await store.onEditorMarkdownChanged(item.markdown, true, {
+    rootPath: item.rootPath,
+    docRelPath: item.docRelPath
+  })
+  if (
+    store.activeWorkspace?.rootPath === item.rootPath &&
+    store.activeDocRelPath === item.docRelPath
+  ) {
+    flashSavedHint()
+  }
+}
+
+async function saveNow(showFeedback = false) {
+  menuOpen.value = false
+  if (!store.activeWorkspace || !store.activeDocRelPath) return
+  const targetRoot = store.activeWorkspace.rootPath
+  const targetRel = store.activeDocRelPath
+  if (pendingSave && (pendingSave.rootPath !== targetRoot || pendingSave.docRelPath !== targetRel)) {
+    await flushPendingSave()
+  } else {
+    if (saveDebounceTimer) {
+      clearTimeout(saveDebounceTimer)
+      saveDebounceTimer = null
+    }
+    pendingSave = null
+  }
   const md = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
-  await store.onEditorMarkdownChanged(md, true)
+  await store.onEditorMarkdownChanged(md, true, {
+    rootPath: targetRoot,
+    docRelPath: targetRel
+  })
   flashSavedHint()
   if (showFeedback) {
-    store.showToast(`已保存：${store.activeDocRelPath}`)
+    store.showToast(`已保存：${targetRel}`)
   }
 }
 
@@ -2524,6 +2561,7 @@ const onDocClick = (e: MouseEvent) => {
 let scrollResizeObs: ResizeObserver | null = null
 
 onMounted(() => {
+  store.registerEditorFlush(flushPendingSave)
   document.addEventListener('click', onDocClick)
   window.addEventListener('keydown', onGlobalKeydown)
   if (scrollEl.value) {
@@ -2545,6 +2583,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  void flushPendingSave()
+  store.registerEditorFlush(null)
   document.removeEventListener('click', onDocClick)
   window.removeEventListener('keydown', onGlobalKeydown)
   if (scrollResizeObs) {
