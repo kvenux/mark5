@@ -591,6 +591,16 @@ let pendingSave: { rootPath: string; docRelPath: string; markdown: string } | nu
 let muyaInstance: Muya | null = null
 let suppressMuyaChange = false
 let pluginsRegistered = false
+const docHistoryCache = new Map<
+  string,
+  { history: ReturnType<Muya['getHistory']>; markdown: string }
+>()
+let lastLoadedDocKey: string | null = null
+
+function getDocCacheKey(rootPath?: string | null, docRelPath?: string | null): string | null {
+  if (!rootPath || !docRelPath) return null
+  return `${rootPath}::${docRelPath}`
+}
 
 const isMarkdownFile = computed(
   () => !store.activeDocRelPath || /\.(md|markdown)$/i.test(store.activeDocRelPath)
@@ -1150,7 +1160,7 @@ async function rejectChange(changeId: string) {
 
   const nextMd = blocks.join('\n\n') + '\n'
   store.markdown = nextMd
-  setMuyaMarkdownQuietly(nextMd)
+  setMuyaMarkdownQuietly(nextMd, true)
   await store.onEditorMarkdownChanged(nextMd, true)
 
   pendingChanges.value = pendingChanges.value.filter((c) => c.id !== changeId)
@@ -1196,7 +1206,7 @@ async function rejectAllChanges() {
   }
   const nextMd = blocks.join('\n\n') + '\n'
   store.markdown = nextMd
-  setMuyaMarkdownQuietly(nextMd)
+  setMuyaMarkdownQuietly(nextMd, true)
   await store.onEditorMarkdownChanged(nextMd, true)
   clearChangedReview()
   store.showToast('已全部退回本轮修改')
@@ -1308,19 +1318,40 @@ function refreshToc() {
   }))
 }
 
-function setMuyaMarkdownQuietly(md: string) {
+function setMuyaMarkdownQuietly(md: string, preserveUndo = false) {
   if (!muyaInstance) {
     mountMuya(md)
     return
   }
   suppressMuyaChange = true
   try {
-    muyaInstance.setContent(md)
+    if (preserveUndo) {
+      try {
+        muyaInstance.replaceContent(md)
+      } catch {
+        muyaInstance.setContent(md)
+      }
+    } else {
+      muyaInstance.setContent(md)
+    }
   } finally {
     suppressMuyaChange = false
   }
   refreshToc()
   marginTick.value += 1
+}
+
+function saveCurrentDocHistory() {
+  if (!muyaInstance || !lastLoadedDocKey) return
+  try {
+    muyaInstance.flush()
+    docHistoryCache.set(lastLoadedDocKey, {
+      history: muyaInstance.getHistory(),
+      markdown: muyaInstance.getMarkdown()
+    })
+  } catch {
+    // ignore if editor is torn down
+  }
 }
 
 watch(
@@ -1330,16 +1361,42 @@ watch(
     selToolbar.open = false
     floatComment.open = false
     threadPop.threadId = null
-    if (!newPath) return
+    const newKey = getDocCacheKey(store.activeWorkspace?.rootPath, newPath)
+    const isSameDoc = Boolean(newKey && newKey === lastLoadedDocKey)
+    if (!isSameDoc) {
+      saveCurrentDocHistory()
+    }
+    if (!newPath) {
+      lastLoadedDocKey = null
+      return
+    }
     if (!/\.(md|markdown)$/i.test(newPath)) {
+      lastLoadedDocKey = newKey
       store.toc = []
       return
     }
     await nextTick()
     if (!muyaInstance) {
       mountMuya(store.markdown)
+      lastLoadedDocKey = newKey
+      const mounted = muyaInstance as Muya | null
+      const cached = newKey ? docHistoryCache.get(newKey) : undefined
+      if (mounted && cached && cached.markdown === mounted.getMarkdown()) {
+        try {
+          mounted.setHistory(cached.history)
+        } catch {}
+      }
+    } else if (isSameDoc) {
+      setMuyaMarkdownQuietly(store.markdown, true)
     } else {
-      setMuyaMarkdownQuietly(store.markdown)
+      setMuyaMarkdownQuietly(store.markdown, false)
+      lastLoadedDocKey = newKey
+      const cached = newKey ? docHistoryCache.get(newKey) : undefined
+      if (cached && cached.markdown === muyaInstance.getMarkdown()) {
+        try {
+          muyaInstance.setHistory(cached.history)
+        } catch {}
+      }
     }
   }
 )
@@ -2165,11 +2222,11 @@ async function drainOpQueue() {
       const isLastUnit = u === diffUnits.length - 1
       if (isLastUnit && op.resultingMarkdown !== undefined) {
         store.markdown = op.resultingMarkdown
-        setMuyaMarkdownQuietly(op.resultingMarkdown)
+        setMuyaMarkdownQuietly(op.resultingMarkdown, true)
       } else {
         const progressiveMd = blocks.join('\n\n') + '\n'
         store.markdown = progressiveMd
-        setMuyaMarkdownQuietly(progressiveMd)
+        setMuyaMarkdownQuietly(progressiveMd, true)
         if (isLastUnit && op.resultingMarkdown === undefined) {
           await store.onEditorMarkdownChanged(progressiveMd, true)
         }
@@ -2439,6 +2496,13 @@ function flashSavedHint() {
 }
 
 async function flushPendingSave() {
+  if (muyaInstance && !suppressMuyaChange) {
+    try {
+      muyaInstance.flush()
+    } catch {
+      // ignore
+    }
+  }
   if (saveDebounceTimer) {
     clearTimeout(saveDebounceTimer)
     saveDebounceTimer = null
@@ -2490,6 +2554,38 @@ const onGlobalKeydown = (e: KeyboardEvent) => {
     e.preventDefault()
     void saveNow(true)
     return
+  }
+
+  // Global Undo / Redo for the active Markdown document (skip text inputs/textareas outside Muya)
+  if (
+    !e.defaultPrevented &&
+    mod &&
+    !e.altKey &&
+    muyaInstance &&
+    isMarkdownFile.value &&
+    (key === 'z' || key === 'y')
+  ) {
+    const active = document.activeElement as HTMLElement | null
+    const inNativeInput = Boolean(
+      active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.tagName === 'SELECT' ||
+          (active.isContentEditable &&
+            (!muyaContainerEl.value || !muyaContainerEl.value.contains(active))))
+    )
+    if (!inNativeInput) {
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        muyaInstance.undo()
+        return
+      }
+      if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        e.preventDefault()
+        muyaInstance.redo()
+        return
+      }
+    }
   }
 
   // Editor-scoped shortcuts (comment / quote / inline Markdown formats)
@@ -2579,6 +2675,7 @@ onMounted(() => {
   }
   if (store.activeDocRelPath) {
     mountMuya(store.markdown)
+    lastLoadedDocKey = getDocCacheKey(store.activeWorkspace?.rootPath, store.activeDocRelPath)
   }
 })
 
