@@ -2136,6 +2136,7 @@ function renderHumanInlineEditHtml(
 }
 
 async function drainOpQueue() {
+  activeDiffId.value = null
   const myRunId = ++animState.runId
   animState.running = true
   animState.paused = false
