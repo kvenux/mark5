@@ -1048,10 +1048,61 @@ function recordPendingChange(
   marginTick.value += 1
 }
 
-function positionDiffCard(blockIndex: number) {
-  const wrap = hostWrapEl.value
+function resolveChangeDomElement(ch: {
+  blockIndex: number
+  newMarkdown?: string
+  oldMarkdown?: string
+}): HTMLElement | null {
   const els = getTopBlockElements()
-  const target = els[Math.min(Math.max(0, blockIndex), Math.max(0, els.length - 1))]
+  if (els.length === 0) return null
+  const totalMdBlocks = Math.max(els.length, splitTopBlocks(store.markdown).length)
+  const domIdx = findDomBlockIndex(
+    ch.newMarkdown || ch.oldMarkdown,
+    ch.blockIndex,
+    els,
+    totalMdBlocks
+  )
+  return domIdx >= 0
+    ? els[domIdx]
+    : els[Math.min(Math.max(0, ch.blockIndex), Math.max(0, els.length - 1))] || null
+}
+
+function resolveChangeMdBlockIndex(
+  blocks: string[],
+  ch: { blockIndex: number; type: 'replace_block' | 'insert_block' | 'delete_block'; newMarkdown: string }
+): number {
+  if (ch.type === 'delete_block') {
+    return Math.min(blocks.length, Math.max(0, ch.blockIndex))
+  }
+  const needle = ch.newMarkdown.trim()
+  if (needle) {
+    const exactMatches: number[] = []
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i].trim() === needle) exactMatches.push(i)
+    }
+    if (exactMatches.length > 0) {
+      return exactMatches.reduce((best, cur) =>
+        Math.abs(cur - ch.blockIndex) < Math.abs(best - ch.blockIndex) ? cur : best
+      )
+    }
+    const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
+    const needleNorm = norm(needle)
+    const fuzzyMatches: number[] = []
+    for (let i = 0; i < blocks.length; i++) {
+      if (norm(blocks[i]) === needleNorm) fuzzyMatches.push(i)
+    }
+    if (fuzzyMatches.length > 0) {
+      return fuzzyMatches.reduce((best, cur) =>
+        Math.abs(cur - ch.blockIndex) < Math.abs(best - ch.blockIndex) ? cur : best
+      )
+    }
+  }
+  return ch.blockIndex
+}
+
+function positionDiffCard(ch: { blockIndex: number; newMarkdown?: string; oldMarkdown?: string }) {
+  const wrap = hostWrapEl.value
+  const target = resolveChangeDomElement(ch)
   if (!wrap || !target) return
   const wRect = wrap.getBoundingClientRect()
   const tRect = target.getBoundingClientRect()
@@ -1068,8 +1119,8 @@ function openDiffForChange(changeId: string) {
   const ch = pendingChanges.value[idx]
   reviewPos.value = idx
   activeDiffId.value = ch.id
-  focusChangedBlock(ch.blockIndex)
-  nextTick(() => positionDiffCard(ch.blockIndex))
+  focusChangedBlock(ch)
+  nextTick(() => positionDiffCard(ch))
 }
 
 function toggleDiffReview() {
@@ -1082,12 +1133,11 @@ function toggleDiffReview() {
   openDiffForChange(pendingChanges.value[safePos].id)
 }
 
-function focusChangedBlock(blockIndex: number) {
+function focusChangedBlock(ch: { blockIndex: number; newMarkdown?: string; oldMarkdown?: string }) {
   const wrap = hostWrapEl.value
-  const els = getTopBlockElements()
-  const target = els[Math.min(Math.max(0, blockIndex), Math.max(0, els.length - 1))]
+  const target = resolveChangeDomElement(ch)
   if (!wrap || !target) return
-  reviewFocusIndex.value = blockIndex
+  reviewFocusIndex.value = ch.blockIndex
   userScrollPausedUntil = 0
   scrollBlockToGoldenZone(target)
   const wRect = wrap.getBoundingClientRect()
@@ -1132,24 +1182,25 @@ async function rejectChange(changeId: string) {
   const idx = pendingChanges.value.findIndex((c) => c.id === changeId)
   if (idx < 0) return
   const ch = pendingChanges.value[idx]
-  const currentMd = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
+  const currentMd = store.markdown || (muyaInstance ? muyaInstance.getMarkdown() : '')
   const blocks = splitTopBlocks(currentMd)
+  const targetIdx = resolveChangeMdBlockIndex(blocks, ch)
 
   if (ch.type === 'replace_block') {
-    if (ch.blockIndex >= 0 && ch.blockIndex < blocks.length) {
-      blocks[ch.blockIndex] = ch.oldMarkdown
+    if (targetIdx >= 0 && targetIdx < blocks.length) {
+      blocks[targetIdx] = ch.oldMarkdown
     }
   } else if (ch.type === 'insert_block') {
-    if (ch.blockIndex >= 0 && ch.blockIndex < blocks.length) {
-      blocks.splice(ch.blockIndex, 1)
+    if (targetIdx >= 0 && targetIdx < blocks.length) {
+      blocks.splice(targetIdx, 1)
     }
     for (const other of pendingChanges.value) {
-      if (other.id !== ch.id && other.blockIndex > ch.blockIndex) {
+      if (other.id !== ch.id && other.blockIndex > targetIdx) {
         other.blockIndex -= 1
       }
     }
   } else if (ch.type === 'delete_block') {
-    const insertAt = Math.min(blocks.length, Math.max(0, ch.blockIndex))
+    const insertAt = Math.min(blocks.length, Math.max(0, targetIdx))
     blocks.splice(insertAt, 0, ch.oldMarkdown)
     for (const other of pendingChanges.value) {
       if (other.id !== ch.id && other.blockIndex >= insertAt) {
@@ -1164,7 +1215,7 @@ async function rejectChange(changeId: string) {
   await store.onEditorMarkdownChanged(nextMd, true)
 
   pendingChanges.value = pendingChanges.value.filter((c) => c.id !== changeId)
-  store.showToast(`已退回第 ${ch.blockIndex + 1} 段原文`)
+  store.showToast(`已退回第 ${targetIdx + 1} 段原文`)
   await nextTick()
   marginTick.value += 1
 
@@ -1186,21 +1237,23 @@ function acceptAllChanges() {
 
 async function rejectAllChanges() {
   if (pendingChanges.value.length === 0) return
-  const currentMd = muyaInstance ? muyaInstance.getMarkdown() : store.markdown
+  const currentMd = store.markdown || (muyaInstance ? muyaInstance.getMarkdown() : '')
   const blocks = splitTopBlocks(currentMd)
-  // Revert from bottom to top so block indices stay accurate
-  const sortedDesc = [...pendingChanges.value].sort((a, b) => b.blockIndex - a.blockIndex)
-  for (const ch of sortedDesc) {
+  // Revert from bottom to top using content-anchored indices
+  const resolved = pendingChanges.value
+    .map((ch) => ({ ch, targetIdx: resolveChangeMdBlockIndex(blocks, ch) }))
+    .sort((a, b) => b.targetIdx - a.targetIdx)
+  for (const { ch, targetIdx } of resolved) {
     if (ch.type === 'replace_block') {
-      if (ch.blockIndex >= 0 && ch.blockIndex < blocks.length) {
-        blocks[ch.blockIndex] = ch.oldMarkdown
+      if (targetIdx >= 0 && targetIdx < blocks.length) {
+        blocks[targetIdx] = ch.oldMarkdown
       }
     } else if (ch.type === 'insert_block') {
-      if (ch.blockIndex >= 0 && ch.blockIndex < blocks.length) {
-        blocks.splice(ch.blockIndex, 1)
+      if (targetIdx >= 0 && targetIdx < blocks.length) {
+        blocks.splice(targetIdx, 1)
       }
     } else if (ch.type === 'delete_block') {
-      const insertAt = Math.min(blocks.length, Math.max(0, ch.blockIndex))
+      const insertAt = Math.min(blocks.length, Math.max(0, targetIdx))
       blocks.splice(insertAt, 0, ch.oldMarkdown)
     }
   }
