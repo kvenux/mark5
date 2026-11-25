@@ -292,7 +292,10 @@ export const useAppStore = defineStore('app', () => {
     win.DIRNAME = parentRel ? `${cleanRoot}/${parentRel}` : cleanRoot
   }
 
+  let openDocRequestSeq = 0
+
   function clearEditorState() {
+    openDocRequestSeq += 1
     openTabs.value = []
     pendingDocOps.value = []
     toc.value = []
@@ -489,16 +492,20 @@ export const useAppStore = defineStore('app', () => {
 
   async function openDocument(relPath: string) {
     if (!activeWorkspace.value) return
+    const reqSeq = ++openDocRequestSeq
+    const targetRoot = activeWorkspace.value.rootPath
     await flushPendingEditorSave()
+    if (reqSeq !== openDocRequestSeq || activeWorkspace.value?.rootPath !== targetRoot) return
     const [content, docThreads, docHistory] = await Promise.all([
-      window.mark5.readMarkdownFile(activeWorkspace.value.rootPath, relPath),
-      window.mark5.listThreads(activeWorkspace.value.rootPath, relPath),
-      window.mark5.listHistory(activeWorkspace.value.rootPath, relPath)
+      window.mark5.readMarkdownFile(targetRoot, relPath),
+      window.mark5.listThreads(targetRoot, relPath),
+      window.mark5.listHistory(targetRoot, relPath)
     ])
+    if (reqSeq !== openDocRequestSeq || activeWorkspace.value?.rootPath !== targetRoot) return
     if (!openTabs.value.includes(relPath)) {
       openTabs.value.push(relPath)
     }
-    syncWindowDirname(activeWorkspace.value.rootPath, relPath)
+    syncWindowDirname(targetRoot, relPath)
     markdown.value = content
     threads.value = docThreads
     history.value = docHistory
