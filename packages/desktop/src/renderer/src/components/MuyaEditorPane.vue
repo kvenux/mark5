@@ -644,6 +644,7 @@ const docHistoryCache = new Map<
   string,
   { history: ReturnType<Muya['getHistory']>; markdown: string }
 >()
+const docScrollMap = new Map<string, number>()
 let lastLoadedDocKey: string | null = null
 
 function getDocCacheKey(rootPath?: string | null, docRelPath?: string | null): string | null {
@@ -1460,6 +1461,9 @@ function setMuyaMarkdownQuietly(md: string, preserveUndo = false) {
 }
 
 function saveCurrentDocHistory() {
+  if (scrollEl.value && lastLoadedDocKey) {
+    docScrollMap.set(lastLoadedDocKey, scrollEl.value.scrollTop)
+  }
   if (!muyaInstance || !lastLoadedDocKey) return
   try {
     muyaInstance.flush()
@@ -1470,6 +1474,15 @@ function saveCurrentDocHistory() {
   } catch {
     // ignore if editor is torn down
   }
+}
+
+function restoreDocScroll(docKey: string | null) {
+  const targetTop = docKey ? docScrollMap.get(docKey) ?? 0 : 0
+  requestAnimationFrame(() => {
+    if (scrollEl.value) {
+      scrollEl.value.scrollTop = targetTop
+    }
+  })
 }
 
 watch(
@@ -1507,6 +1520,7 @@ watch(
           mounted.setHistory(cached.history)
         } catch {}
       }
+      restoreDocScroll(newKey)
     } else if (isSameDoc) {
       setMuyaMarkdownQuietly(store.markdown, true)
     } else {
@@ -1518,6 +1532,7 @@ watch(
           muyaInstance.setHistory(cached.history)
         } catch {}
       }
+      restoreDocScroll(newKey)
     }
   }
 )
