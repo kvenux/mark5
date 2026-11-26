@@ -1,6 +1,6 @@
 [package]
 name = "mark5"
-version = "0.1.0"
+version = "0.2.0"
 description = "Mark 5 — Ultra-lightweight AI-Native Markdown Editor"
 authors = ["Mark 5"]
 edition = "2021"

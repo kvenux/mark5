@@ -1,7 +1,7 @@
 {
   "name": "mark5-monorepo",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Mark 5 — Ultra-lightweight AI-Native Markdown Editor powered by Tauri v2, Rust, and Muya",
   "scripts": {
     "dev": "pnpm --filter mark5-desktop tauri:dev",
